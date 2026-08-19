@@ -1,0 +1,22 @@
+name: Atualiza fotos do catálogo
+
+on:
+  schedule:
+    - cron: '30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  fotos:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar os arquivos
+        uses: actions/checkout@v4
+      - name: Preparar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Sincronizar fotos
+        run: node fotos.js
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
