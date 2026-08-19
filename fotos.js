@@ -1,7 +1,9 @@
 // Robô das FOTOS: lê as pastas do Drive e liga cada foto ao produto no catálogo (Supabase).
-// Padrões de nome: "5010" (1 código) ou "5010-5011-5012" (mesma foto p/ vários códigos).
-// Nomes com letras (ex.: "5010 modelo") são ignorados por ora (reservado p/ 2ª foto).
-// Senhas via env (secrets): GOOGLE_API_KEY, SUPABASE_SERVICE_KEY.
+// Padrões de nome:
+//   "5010"            -> foto principal do código 5010
+//   "5010-5011-5012"  -> mesma foto principal p/ vários códigos
+//   "5010 modelo"     -> 2ª foto (na modelo) do código 5010 (nome com letra = 2ª foto)
+// Grava foto = "idPrincipal[,idModelo]" (separado por vírgula). Senhas via env (secrets).
 const GKEY = process.env.GOOGLE_API_KEY;
 const SVC = process.env.SUPABASE_SERVICE_KEY;
 const DRY = process.env.DRY === "1";
@@ -47,29 +49,37 @@ async function sbSet(codigo, foto) {
 
 (async () => {
   const t0 = Date.now();
-  // 1) monta código -> fileId a partir das duas pastas (mais recente vence)
-  const desejado = new Map();
+  const principal = new Map(); // codigo -> fileId (foto do produto)
+  const modelo = new Map();    // codigo -> fileId (foto na modelo)
   for (const f of FOLDERS) {
-    const files = await listFolder(f); // já vem ordenado por mais recente
+    const files = await listFolder(f); // já vem do mais recente p/ o mais antigo
     for (const file of files) {
       const base = file.name.replace(/\.[a-z0-9]+$/i, "").trim();
-      if (!/^[\d\s-]+$/.test(base)) continue; // ignora nomes com letras (ex.: "modelo")
-      const codes = base.match(/\d+/g) || [];
-      for (const c of codes) if (!desejado.has(c)) desejado.set(c, file.id);
+      if (/^\d+(-\d+)*$/.test(base)) {            // "5010" ou "5010-5011" -> foto principal
+        for (const n of base.split("-")) if (!principal.has(n)) principal.set(n, file.id);
+      } else {
+        const mm = base.match(/^(\d+)\s+[a-zA-Z]/); // "5010 modelo" -> 2ª foto do 5010
+        if (mm && !modelo.has(mm[1])) modelo.set(mm[1], file.id);
+        // qualquer outro nome (logo, lixo, "5550 (2)") é ignorado
+      }
     }
   }
-  console.log("Fotos no Drive (códigos):", desejado.size);
 
-  // 2) estado atual do catálogo
+  const desejado = new Map();
+  const todos = new Set([...principal.keys(), ...modelo.keys()]);
+  for (const c of todos) {
+    const arr = [principal.get(c), modelo.get(c)].filter(Boolean);
+    desejado.set(c, arr.join(","));
+  }
+  console.log("Fotos no Drive (códigos):", desejado.size, "| com 2ª foto (modelo):", modelo.size);
+
   const atual = await supaProdutos();
-
-  // 3) aplica só as diferenças
   let novas = 0, semProduto = 0, iguais = 0;
-  for (const [cod, fid] of desejado) {
+  for (const [cod, val] of desejado) {
     if (!atual.has(cod)) { semProduto++; continue; }
-    if (atual.get(cod) === fid) { iguais++; continue; }
+    if (atual.get(cod) === val) { iguais++; continue; }
     if (DRY) { novas++; continue; }
-    if (await sbSet(cod, fid)) novas++;
+    if (await sbSet(cod, val)) novas++;
   }
   console.log((DRY ? "A ATUALIZAR: " : "ATUALIZADAS: ") + novas, "| já certas:", iguais, "| código sem produto:", semProduto,
     "| tempo:", Math.round((Date.now() - t0) / 1000) + "s");
