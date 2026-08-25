@@ -150,18 +150,34 @@ async function inserirTodos(linhas) {
 (async () => {
   const t0 = Date.now();
   const agora = new Date();
-  let ini, fim = fmt(agora);
+  let ini;
+  const fim = fmt(agora);
+
+  let prods;
 
   if (MODO === "full") {
-    ini = "01/01/2020 00:00:00";
-    console.log("MODO COMPLETO: puxando a base inteira desde 2020");
+    // ATENÇÃO: janela muito longa faz a Terasoft CORTAR o resultado sem avisar.
+    // Medido em 25/08/2026: "2020 até hoje" devolveu 9.997 produtos e "2023 até hoje"
+    // devolveu 10.087, sendo o primeiro subconjunto exato do segundo. Nada falha,
+    // só faltam registros. Por isso a carga completa vai ano a ano.
+    console.log("MODO COMPLETO: puxando ano a ano, pra não perder registro");
+    const mapa = new Map();
+    const anoFinal = agora.getFullYear();
+    for (let ano = 2023; ano <= anoFinal; ano++) {
+      const de = `01/01/${ano} 00:00:00`;
+      const ate = ano === anoFinal ? fim : `31/12/${ano} 23:59:59`;
+      const parte = await terasoft(de, ate);
+      parte.forEach((x) => mapa.set(String(x.CODIGO), x));
+      console.log(`   ${ano}: ${parte.length} produtos (acumulado ${mapa.size})`);
+    }
+    prods = [...mapa.values()];
+    console.log(`Total consolidado: ${prods.length} produtos`);
   } else {
     ini = fmt(new Date(agora.getTime() - JANELA_MIN * 60 * 1000));
     console.log(`MODO INCREMENTAL: alterações entre ${ini} e ${fim}`);
+    prods = await terasoft(ini, fim);
+    console.log(`Terasoft devolveu ${prods.length} produtos`);
   }
-
-  const prods = await terasoft(ini, fim);
-  console.log(`Terasoft devolveu ${prods.length} produtos`);
   if (!prods.length) { console.log("Nada mudou na janela. Encerrando."); return; }
 
   const atual = await lerAtual();
