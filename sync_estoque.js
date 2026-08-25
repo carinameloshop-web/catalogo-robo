@@ -67,46 +67,63 @@ function derivaTipo(desc) {
   return "Outros";
 }
 
-async function lerCodigosExistentes() {
-  const set = new Set();
+// Lê o que já está no catálogo hoje: código, estoque e preço.
+// Serve pra duas coisas: saber quem é novo, e evitar regravar quem não mudou.
+async function lerAtual() {
+  const mapa = new Map();
   for (let off = 0; ; off += 1000) {
-    const r = await fetch(SB + "?select=codigo&limit=1000&offset=" + off, {
+    const r = await fetch(SB + "?select=codigo,estoque,preco&limit=1000&offset=" + off, {
       headers: { apikey: SVC, Authorization: "Bearer " + SVC },
     });
     const d = await r.json();
     if (!Array.isArray(d) || !d.length) break;
-    d.forEach((x) => set.add(String(x.codigo)));
+    d.forEach((x) => mapa.set(String(x.codigo), { estoque: Number(x.estoque) || 0, preco: x.preco === null ? null : String(x.preco) }));
     if (d.length < 1000) break;
   }
-  return set;
+  return mapa;
 }
 
-// ATENÇÃO: o Supabase exige que TODOS os registros de um mesmo lote tenham
-// exatamente as mesmas colunas. Por isso produto novo (que leva tipo e material)
-// e produto já existente (que não leva, pra não sobrescrever classificação feita
-// à mão) são gravados em chamadas separadas.
-async function gravar(linhas, rotulo) {
-  if (!linhas.length) return 0;
-  // merge-duplicates atualiza só as colunas enviadas. Como "foto" não vai no corpo,
-  // a foto existente nunca é apagada.
+// ATUALIZAR: uma chamada por produto, em paralelo. Não usa upsert de propósito,
+// porque a tabela não tem restrição de unicidade no código e o Supabase recusaria.
+// Como só atualizamos o que realmente mudou, o volume costuma ser pequeno.
+const CONC = 15;
+async function atualizarUm(l) {
+  const r = await fetch(SB + "?codigo=eq." + l.codigo, {
+    method: "PATCH",
+    headers: {
+      apikey: SVC, Authorization: "Bearer " + SVC,
+      "Content-Type": "application/json", Prefer: "return=minimal",
+    },
+    body: JSON.stringify({ estoque: l.estoque, preco: l.preco, descricao: l.descricao, marca: l.marca }),
+  });
+  if (!r.ok) throw new Error("Supabase recusou atualizar o código " + l.codigo + ": " + (await r.text()).slice(0, 160));
+}
+async function atualizarTodos(linhas) {
+  let feitos = 0;
+  for (let i = 0; i < linhas.length; i += CONC) {
+    await Promise.all(linhas.slice(i, i + CONC).map(atualizarUm));
+    feitos += Math.min(CONC, linhas.length - i);
+    if (feitos % 300 === 0 || feitos === linhas.length) console.log(`   atualizados ${feitos}/${linhas.length}`);
+  }
+  return feitos;
+}
+
+// CADASTRAR: inserção simples em lote, que não depende de restrição nenhuma.
+async function inserirTodos(linhas) {
   let ok = 0;
   for (let i = 0; i < linhas.length; i += 500) {
     const lote = linhas.slice(i, i + 500);
-    const r = await fetch(SB + "?on_conflict=codigo", {
+    const r = await fetch(SB, {
       method: "POST",
       headers: {
         apikey: SVC, Authorization: "Bearer " + SVC,
-        "Content-Type": "application/json",
-        Prefer: "resolution=merge-duplicates,return=minimal",
+        "Content-Type": "application/json", Prefer: "return=minimal",
       },
       body: JSON.stringify(lote),
     });
-    if (!r.ok) {
-      const t = await r.text();
-      throw new Error("Supabase recusou o lote " + (i / 500 + 1) + ": " + t.slice(0, 200));
-    }
+    if (!r.ok) throw new Error("Supabase recusou cadastrar o lote " + (i / 500 + 1) + ": " + (await r.text()).slice(0, 160));
     ok += lote.length;
-    console.log(`   ${rotulo}: ${ok}/${linhas.length}`);
+    console.log(`   cadastrados ${ok}/${linhas.length}`);
   }
   return ok;
 }
@@ -128,7 +145,8 @@ async function gravar(linhas, rotulo) {
   console.log(`Terasoft devolveu ${prods.length} produtos`);
   if (!prods.length) { console.log("Nada mudou na janela. Encerrando."); return; }
 
-  const existentes = await lerCodigosExistentes();
+  const atual = await lerAtual();
+  console.log(`Catálogo tem hoje ${atual.size} produtos`);
   const atualizar = [];   // já existem: só estoque, preço, descrição e marca
   const inserir = [];     // novos: levam também tipo e material
 
@@ -142,8 +160,10 @@ async function gravar(linhas, rotulo) {
       preco: p.VENDA === null || p.VENDA === undefined ? null : String(p.VENDA),
       marca: p.MARCA || "",
     };
-    if (existentes.has(String(cod))) {
-      atualizar.push(linha);
+    const antes = atual.get(String(cod));
+    if (antes) {
+      // só entra na fila de atualização quem realmente mudou
+      if (antes.estoque !== linha.estoque || antes.preco !== linha.preco) atualizar.push(linha);
     } else {
       linha.tipo = derivaTipo(p.DESCRICAO);
       linha.material = derivaMaterial(p.DESCRICAO);
@@ -151,12 +171,9 @@ async function gravar(linhas, rotulo) {
     }
   }
 
-  const todos = atualizar.concat(inserir);
-  const comEstoque = todos.filter((l) => l.estoque > 0).length;
-  const aurora = todos.filter((l) => /aurora/i.test(l.marca)).length;
-  console.log(`A gravar: ${todos.length} | atualizar: ${atualizar.length} | novos: ${inserir.length} | com estoque: ${comEstoque} | Aurora Muniz: ${aurora}`);
+  console.log(`Mudaram de verdade: ${atualizar.length} | produtos novos a cadastrar: ${inserir.length}`);
 
-  const a = await gravar(atualizar, "atualizados");
-  const b = await gravar(inserir, "novos");
+  const a = await atualizarTodos(atualizar);
+  const b = await inserirTodos(inserir);
   console.log(`OK. ${a + b} produtos gravados em ${Math.round((Date.now() - t0) / 1000)}s`);
 })().catch((e) => { console.error("ERRO:", e.message); process.exit(1); });
