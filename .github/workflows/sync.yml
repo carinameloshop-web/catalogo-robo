@@ -2,8 +2,13 @@ name: Atualiza estoque do catálogo
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
+    inputs:
+      modo:
+        description: 'incremental (só o que mudou) ou full (base inteira)'
+        required: false
+        default: 'incremental'
 
 jobs:
   sync:
@@ -15,8 +20,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Rodar atualização
+      - name: Sincronizar estoque
         run: node sync_estoque.js
         env:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           TERASOFT_AUTH: ${{ secrets.TERASOFT_AUTH }}
+          MODO: ${{ github.event.inputs.modo || 'incremental' }}
+          JANELA_MIN: '60'
