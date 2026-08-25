@@ -11,6 +11,8 @@
 //
 // NÃO mexe em foto. Foto é do outro robô (fotos.js).
 
+const https = require("node:https");
+
 const SB = "https://dqljtdznecqzninwvtsj.supabase.co/rest/v1/produtos";
 const SVC = process.env.SUPABASE_SERVICE_KEY;
 const TERA = process.env.TERASOFT_AUTH;              // "usuario:senha"
@@ -30,23 +32,40 @@ function fmt(d) {
          `${p(br.getUTCHours())}:${p(br.getUTCMinutes())}:${p(br.getUTCSeconds())}`;
 }
 
-async function terasoft(ini, fim) {
-  const u = "https://apiserver.ip.inf.br:12067/consulta?ep=produto_periodo" +
-            "&data_inicial=" + encodeURIComponent(ini) +
-            "&data_final=" + encodeURIComponent(fim);
-  const r = await fetch(u, { headers: { Authorization: AUTH } });
-  const txt = await r.text();
-  let j;
-  try { j = JSON.parse(txt); }
-  catch (e) { throw new Error("Terasoft devolveu algo que não é JSON: " + txt.slice(0, 200)); }
-
-  // O bloqueio por limite vem como objeto com sucesso:false. Antes isso passava
-  // despercebido e o robô terminava "com sucesso" sem atualizar nada. Agora falha alto.
-  if (!Array.isArray(j)) {
-    const msg = (j && j.mensagem) ? String(j.mensagem).replace(/\n/g, " ") : JSON.stringify(j).slice(0, 200);
-    throw new Error("Terasoft recusou a consulta: " + msg);
-  }
-  return j;
+function terasoft(ini, fim) {
+  // O servidor da Terasoft usa certificado próprio, que o Node recusa por padrão.
+  // Por isso NÃO dá pra usar fetch() aqui: é preciso o módulo https com
+  // rejectUnauthorized:false, do mesmo jeito que o robô antigo fazia.
+  const caminho = "/consulta?ep=produto_periodo" +
+    "&data_inicial=" + encodeURIComponent(ini) +
+    "&data_final=" + encodeURIComponent(fim);
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: "apiserver.ip.inf.br", port: 12067, path: caminho, method: "GET",
+      headers: { Authorization: AUTH },
+      rejectUnauthorized: false,
+      timeout: 300000,
+    }, (r) => {
+      const partes = [];
+      r.on("data", (c) => partes.push(c));
+      r.on("end", () => {
+        const txt = Buffer.concat(partes).toString("utf8");
+        let j;
+        try { j = JSON.parse(txt); }
+        catch (e) { return reject(new Error("Terasoft devolveu algo que não é JSON: " + txt.slice(0, 200))); }
+        // O bloqueio por limite vem como objeto com sucesso:false. Antes isso passava
+        // despercebido e o robô terminava "com sucesso" sem atualizar nada.
+        if (!Array.isArray(j)) {
+          const msg = (j && j.mensagem) ? String(j.mensagem).replace(/\n/g, " ") : JSON.stringify(j).slice(0, 200);
+          return reject(new Error("Terasoft recusou a consulta: " + msg));
+        }
+        resolve(j);
+      });
+    });
+    req.on("error", (e) => reject(new Error("Falha de conexão com a Terasoft: " + e.message)));
+    req.on("timeout", () => { req.destroy(); reject(new Error("Terasoft não respondeu em 5 minutos")); });
+    req.end();
+  });
 }
 
 // Produtos novos chegam sem tipo/material. Regras dadas pela Carina.
