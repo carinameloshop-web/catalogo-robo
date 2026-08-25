@@ -81,7 +81,12 @@ async function lerCodigosExistentes() {
   return set;
 }
 
-async function gravar(linhas) {
+// ATENÇÃO: o Supabase exige que TODOS os registros de um mesmo lote tenham
+// exatamente as mesmas colunas. Por isso produto novo (que leva tipo e material)
+// e produto já existente (que não leva, pra não sobrescrever classificação feita
+// à mão) são gravados em chamadas separadas.
+async function gravar(linhas, rotulo) {
+  if (!linhas.length) return 0;
   // merge-duplicates atualiza só as colunas enviadas. Como "foto" não vai no corpo,
   // a foto existente nunca é apagada.
   let ok = 0;
@@ -101,7 +106,7 @@ async function gravar(linhas) {
       throw new Error("Supabase recusou o lote " + (i / 500 + 1) + ": " + t.slice(0, 200));
     }
     ok += lote.length;
-    process.stdout.write(`   gravados ${ok}/${linhas.length}\r`);
+    console.log(`   ${rotulo}: ${ok}/${linhas.length}`);
   }
   return ok;
 }
@@ -124,8 +129,8 @@ async function gravar(linhas) {
   if (!prods.length) { console.log("Nada mudou na janela. Encerrando."); return; }
 
   const existentes = await lerCodigosExistentes();
-  const linhas = [];
-  let novos = 0;
+  const atualizar = [];   // já existem: só estoque, preço, descrição e marca
+  const inserir = [];     // novos: levam também tipo e material
 
   for (const p of prods) {
     const cod = parseInt(p.CODIGO, 10);
@@ -137,18 +142,21 @@ async function gravar(linhas) {
       preco: p.VENDA === null || p.VENDA === undefined ? null : String(p.VENDA),
       marca: p.MARCA || "",
     };
-    if (!existentes.has(String(cod))) {
-      novos++;
+    if (existentes.has(String(cod))) {
+      atualizar.push(linha);
+    } else {
       linha.tipo = derivaTipo(p.DESCRICAO);
       linha.material = derivaMaterial(p.DESCRICAO);
+      inserir.push(linha);
     }
-    linhas.push(linha);
   }
 
-  const comEstoque = linhas.filter((l) => l.estoque > 0).length;
-  const aurora = linhas.filter((l) => /aurora/i.test(l.marca)).length;
-  console.log(`A gravar: ${linhas.length} | novos: ${novos} | com estoque: ${comEstoque} | Aurora Muniz: ${aurora}`);
+  const todos = atualizar.concat(inserir);
+  const comEstoque = todos.filter((l) => l.estoque > 0).length;
+  const aurora = todos.filter((l) => /aurora/i.test(l.marca)).length;
+  console.log(`A gravar: ${todos.length} | atualizar: ${atualizar.length} | novos: ${inserir.length} | com estoque: ${comEstoque} | Aurora Muniz: ${aurora}`);
 
-  const gravados = await gravar(linhas);
-  console.log(`\nOK. ${gravados} produtos gravados em ${Math.round((Date.now() - t0) / 1000)}s`);
+  const a = await gravar(atualizar, "atualizados");
+  const b = await gravar(inserir, "novos");
+  console.log(`OK. ${a + b} produtos gravados em ${Math.round((Date.now() - t0) / 1000)}s`);
 })().catch((e) => { console.error("ERRO:", e.message); process.exit(1); });
