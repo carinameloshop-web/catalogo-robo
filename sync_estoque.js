@@ -68,22 +68,83 @@ function terasoft(ini, fim) {
   });
 }
 
-// Produtos novos chegam sem tipo/material. Regras dadas pela Carina.
-function derivaMaterial(desc) {
+// TIPO e BANHO. Mudou em 31/08/2026, quando a Terasoft passou a mandar GRUPO
+// no produto_periodo. Antes eu adivinhava os dois pela descrição, e errava:
+// deu 392 correções na mão num único dia.
+//
+// A divisão de trabalho entre as duas fontes não é simétrica, e isso foi medido:
+//   TIPO  -> o GRUPO manda. Ele diz colar/brinco/anel sem chance de erro.
+//   BANHO -> a DESCRIÇÃO manda. Descrição e grupo se contradizem em 253 produtos,
+//            e o grupo só resolve sozinho 115. Como a descrição é o título que a
+//            afiliada lê no card, o rótulo tem que combinar com ela.
+// Em ambos, a outra fonte entra só quando a primeira não sabe.
+
+function derivaTipo(grupo, desc) {
+  // 1. O grupo da Terasoft manda. Ele acerta 8 em cada 10.
+  const g = (grupo || "").toUpperCase();
+  // o grupo inteiro, não só o que vem depois do traço: existe "PIERCING - FOLHEADO",
+  // onde a palavra que importa está na frente.
+  const corpo = g;
+  for (const [chave, t] of [["BRINCO", "Brinco"], ["PIERCING", "Brinco"], ["ARGOLA", "Brinco"],
+                            ["ESCAPULARIO", "Colar"], ["COLAR", "Colar"], ["CORRENTE", "Colar"],
+                            ["ANEL", "Anel"], ["BRACELETE", "Pulseira"], ["PULSEIRA", "Pulseira"],
+                            ["BERLOQUE", "Pingente"], ["TORNOZELEIRA", "Tornozeleira"],
+                            ["PRESILHA", "Outros"], ["LEN", "Outros"]]) {
+    if (corpo.includes(chave)) return t;
+  }
+
+  // 2. Grupo de coleção (PERSONALIZADOS, HOMEM, FAST FASHION, GLAM, INFANTIL) não
+  // diz o tipo. Aí lê a descrição. A ORDEM abaixo é o que importa, e ela foi tirada
+  // de casos reais que a Carina apontou em 28 e 31/08/2026:
   const u = (desc || "").toUpperCase();
-  if (u.startsWith("OURO BRANCO")) return "Ouro Branco";
-  if (u.startsWith("PALADIUM") || u.startsWith("PALADIO")) return "Paladio";
-  return "Ouro";
-}
-function derivaTipo(desc) {
-  const u = (desc || "").toUpperCase();
+
+  // aparador é acessório de anel, e o número dele é aro, não centímetro
+  if (/APARADOR/.test(u)) return "Anel";
+
+  // o substantivo escrito ganha de tudo: "COLAR MONOGRAMA" é colar, não pingente
   if (/\bTRIO\b/.test(u) || /BRINCO|ARGOLA/.test(u)) return "Brinco";
   if (/ANEL|ALIAN[CÇ]A/.test(u)) return "Anel";
   if (/TORNOZELEIRA/.test(u)) return "Tornozeleira";
-  if (/PULSEIRA|BRACELETE|\b14CM\b|\b16CM\b|\b18CM\b/.test(u)) return "Pulseira";
-  if (/COLAR|GARGANTILHA|CORRENTE|\b40CM\b|\b45CM\b|\b50CM\b|\b60CM\b|\b70CM\b/.test(u)) return "Colar";
-  if (/PINGENTE|BERLOQUE|PINGENTES/.test(u)) return "Pingente";
+  if (/PULSEIRA|BRACELETE/.test(u)) return "Pulseira";
+  if (/COLAR|GARGANTILHA|CORRENTE|ESCAPULARIO/.test(u)) return "Colar";
+
+  // a medida vem ANTES de "pingente": "45CM VENEZIANA COM PINGENTE" é colar,
+  // o pingente ali é o enfeite, não a peça
+  const med = [...u.matchAll(/(?:^|[^\d,])(\d{2,3})\s?CM/g)].map((m) => parseInt(m[1], 10));
+  if (med.length) {
+    const m = Math.max(...med);
+    if (m >= 33 && m <= 90) return "Colar";
+    if (m >= 12 && m <= 21) return "Pulseira";
+  }
+
+  // corrente sem medida na descrição: veneziana, cordão e afins são colar
+  if (/VENEZIANA|CORDAO|CORDÃO|CINGAPURA|CADEADO|CARTIER|RIVIERA|RIVIEIRA/.test(u)) return "Colar";
+  if (/PINGENTE|BERLOQUE/.test(u)) return "Pingente";
+  if (/DUPLINHA/.test(u)) return "Brinco";
+  if (/MONOGRAMA/.test(u)) return "Pingente";
+
+  // peça que COMEÇA com ARO é colar. "BRINCO ARO" não cai aqui: já saiu acima.
+  const semBanho = u.replace(/^\s*#*\s*(OURO BRANCO|RODIO BRANCO|PALADIUM|PALADIO|STEEL|ACO|AÇO|PRATA|GRAFITE|OURO|RODIO)\s*-\s*/, "").trim();
+  if (semBanho.startsWith("ARO ")) return "Colar";
+
   return "Outros";
+}
+
+function derivaBanho(desc, grupo) {
+  const u = (desc || "").trim().toUpperCase();
+  for (const [pre, v] of [["OURO BRANCO", "Ouro Branco"], ["RODIO BRANCO", "Ouro Branco"],
+                          ["PALADIUM", "Paladio"], ["PALADIO", "Paladio"],
+                          ["STEEL", "Steel"], ["ACO ", "Steel"], ["AÇO ", "Steel"], ["PRATA", "Prata"],
+                          ["GRAFITE", "Grafite"], ["OURO", "Ouro"]]) {
+    if (u.startsWith(pre)) return v;
+  }
+  const g = (grupo || "").toUpperCase();
+  if (g.startsWith("OURO BRANCO") || g.startsWith("RODIO BRANCO")) return "Ouro Branco";
+  if (g.startsWith("PALADIUM") || g.startsWith("PALADIO")) return "Paladio";
+  if (g.startsWith("OURO")) return "Ouro";
+  if (g.includes("STEEL")) return "Steel";
+  if (g.startsWith("GRAFITE")) return "Grafite";
+  return "Ouro";
 }
 
 // Lê o que já está no catálogo hoje: código, estoque e preço.
@@ -91,12 +152,16 @@ function derivaTipo(desc) {
 async function lerAtual() {
   const mapa = new Map();
   for (let off = 0; ; off += 1000) {
-    const r = await fetch(SB + "?select=codigo,estoque,preco&limit=1000&offset=" + off, {
+    const r = await fetch(SB + "?select=codigo,estoque,preco,tipo,material,grupo&limit=1000&offset=" + off, {
       headers: { apikey: SVC, Authorization: "Bearer " + SVC },
     });
     const d = await r.json();
     if (!Array.isArray(d) || !d.length) break;
-    d.forEach((x) => mapa.set(String(x.codigo), { estoque: Number(x.estoque) || 0, preco: x.preco === null ? null : String(x.preco) }));
+    d.forEach((x) => mapa.set(String(x.codigo), {
+      estoque: Number(x.estoque) || 0,
+      preco: x.preco === null ? null : String(x.preco),
+      tipo: x.tipo || null, material: x.material || null, grupo: x.grupo || null,
+    }));
     if (d.length < 1000) break;
   }
   return mapa;
@@ -113,7 +178,10 @@ async function atualizarUm(l) {
       apikey: SVC, Authorization: "Bearer " + SVC,
       "Content-Type": "application/json", Prefer: "return=minimal",
     },
-    body: JSON.stringify({ estoque: l.estoque, preco: l.preco, descricao: l.descricao, marca: l.marca }),
+    body: JSON.stringify({
+      estoque: l.estoque, preco: l.preco, descricao: l.descricao, marca: l.marca,
+      grupo: l.grupo, tipo: l.tipo, material: l.material,
+    }),
   });
   if (!r.ok) throw new Error("Supabase recusou atualizar o código " + l.codigo + ": " + (await r.text()).slice(0, 160));
 }
@@ -182,8 +250,8 @@ async function inserirTodos(linhas) {
 
   const atual = await lerAtual();
   console.log(`Catálogo tem hoje ${atual.size} produtos`);
-  const atualizar = [];   // já existem: só estoque, preço, descrição e marca
-  const inserir = [];     // novos: levam também tipo e material
+  const atualizar = [];
+  const inserir = [];
 
   for (const p of prods) {
     const cod = parseInt(p.CODIGO, 10);
@@ -194,14 +262,21 @@ async function inserirTodos(linhas) {
       estoque: Number(p.ESTOQUE) || 0,
       preco: p.VENDA === null || p.VENDA === undefined ? null : String(p.VENDA),
       marca: p.MARCA || "",
+      grupo: p.GRUPO || null,
     };
+    // Tipo e banho são recalculados SEMPRE, não só no cadastro. Era esse o
+    // buraco antigo: o produto nascia com um rótulo e nunca mais era revisto,
+    // então corrigir a regra não consertava nada do que já estava lá.
+    linha.tipo = derivaTipo(linha.grupo, linha.descricao);
+    linha.material = derivaBanho(linha.descricao, linha.grupo);
+
     const antes = atual.get(String(cod));
     if (antes) {
-      // só entra na fila de atualização quem realmente mudou
-      if (antes.estoque !== linha.estoque || antes.preco !== linha.preco) atualizar.push(linha);
+      const mudou = antes.estoque !== linha.estoque || antes.preco !== linha.preco
+                 || antes.grupo !== linha.grupo || antes.tipo !== linha.tipo
+                 || antes.material !== linha.material;
+      if (mudou) atualizar.push(linha);
     } else {
-      linha.tipo = derivaTipo(p.DESCRICAO);
-      linha.material = derivaMaterial(p.DESCRICAO);
       inserir.push(linha);
     }
   }
