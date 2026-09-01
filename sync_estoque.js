@@ -80,7 +80,24 @@ function terasoft(ini, fim) {
 // Em ambos, a outra fonte entra só quando a primeira não sabe.
 
 function derivaTipo(grupo, desc) {
-  // 1. O grupo da Terasoft manda. Ele acerta 8 em cada 10.
+  // 1. Se a descrição ESCREVE o substantivo, ela ganha de tudo.
+  //
+  // Descoberto em 01/09/2026: 57 peças têm grupo errado na Terasoft e a
+  // descrição certa — 34 delas são "STEEL - 17 ALIANCA 4MM" dentro do grupo
+  // STEEL BRINCO. Confiar só no grupo levava aliança pra aba de brinco.
+  //
+  // A ordem abaixo é de especificidade: PULSEIRA antes de BRINCO porque
+  // existe "PULSEIRA ARO ARGOLA"; BERLOQUE antes de tudo porque é pingente.
+  const d = (desc || "").toUpperCase();
+  for (const [pal, t] of [["TORNOZELEIRA", "Tornozeleira"], ["ESCAPULARIO", "Colar"],
+                          ["GARGANTILHA", "Colar"], ["BERLOQUE", "Pingente"],
+                          ["PIERCING", "Brinco"], ["BRACELETE", "Pulseira"],
+                          ["PULSEIRA", "Pulseira"], ["BRINCO", "Brinco"],
+                          ["COLAR", "Colar"], ["ALIAN[CÇ]A", "Anel"], ["ANEL", "Anel"]]) {
+    if (new RegExp("\\b" + pal + "\\b").test(d)) return t;
+  }
+
+  // 2. Senão, o grupo da Terasoft. Ele acerta 8 em cada 10.
   const g = (grupo || "").toUpperCase();
   // o grupo inteiro, não só o que vem depois do traço: existe "PIERCING - FOLHEADO",
   // onde a palavra que importa está na frente.
