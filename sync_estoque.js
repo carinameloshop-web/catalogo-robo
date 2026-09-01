@@ -131,7 +131,9 @@ function derivaTipo(grupo, desc) {
 }
 
 function derivaBanho(desc, grupo) {
-  const u = (desc || "").trim().toUpperCase();
+  // alguns cadastros começam com "##". Sem tirar isso, a regra do banho
+  // não reconhece o prefixo e a peça cai em Ouro por engano.
+  const u = (desc || "").replace(/^[#\s]+/, "").toUpperCase();
   for (const [pre, v] of [["OURO BRANCO", "Ouro Branco"], ["RODIO BRANCO", "Ouro Branco"],
                           ["PALADIUM", "Paladio"], ["PALADIO", "Paladio"],
                           ["STEEL", "Steel"], ["ACO ", "Steel"], ["AÇO ", "Steel"], ["PRATA", "Prata"],
@@ -145,6 +147,32 @@ function derivaBanho(desc, grupo) {
   if (g.includes("STEEL")) return "Steel";
   if (g.startsWith("GRAFITE")) return "Grafite";
   return "Ouro";
+}
+
+// Consulta UM produto pelo SKU. Usado só pra conferir os esquecidos,
+// aqueles que o produto_periodo nunca devolve.
+function terasoftSKU(sku) {
+  return new Promise((resolve) => {
+    const req = https.request({
+      hostname: "apiserver.ip.inf.br", port: 12067,
+      path: "/consulta?ep=produto&SKU=" + encodeURIComponent(sku),
+      method: "GET", headers: { Authorization: AUTH },
+      rejectUnauthorized: false, timeout: 120000,
+    }, (res) => {
+      let t = "";
+      res.on("data", (d) => (t += d));
+      res.on("end", () => {
+        try {
+          const j = JSON.parse(t);
+          const p = Array.isArray(j) ? j[0] : j;
+          resolve(p && p.CODIGO ? p : null);
+        } catch (e) { resolve(null); }
+      });
+    });
+    req.on("timeout", () => { req.destroy(); resolve(null); });
+    req.on("error", () => resolve(null));
+    req.end();
+  });
 }
 
 // Lê o que já está no catálogo hoje: código, estoque e preço.
@@ -285,5 +313,45 @@ async function inserirTodos(linhas) {
 
   const a = await atualizarTodos(atualizar);
   const b = await inserirTodos(inserir);
-  console.log(`OK. ${a + b} produtos gravados em ${Math.round((Date.now() - t0) / 1000)}s`);
+
+  // CONFERIR OS ESQUECIDOS — devagar, duas por rodada.
+  //
+  // O produto_periodo devolve o que foi ALTERADO, não o que existe. Peça antiga
+  // que ninguém toca desde 2022 nunca aparece ali, mesmo tendo estoque — então o
+  // estoque dela congela no valor do dia em que o catálogo foi montado. Foi assim
+  // que o 005534 ficou com 1 peça no catálogo tendo 0 na Terasoft.
+  //
+  // Zerar todo mundo que não veio seria errado: o 005975 nunca vem no periodo e
+  // TEM 1 peça de verdade. Então a gente pergunta uma por uma, pelo ep=produto,
+  // e só das que estão mostrando estoque sem nunca terem sido conferidas.
+  // Duas por rodada cabe folgado no limite de 12 consultas por hora.
+  let z = 0;
+  try {
+    const r = await fetch(SB + "?select=codigo&grupo=is.null&estoque=gt.0&limit=2", {
+      headers: { apikey: SVC, Authorization: "Bearer " + SVC },
+    });
+    const esquecidos = await r.json();
+    for (const e of (Array.isArray(esquecidos) ? esquecidos : [])) {
+      const sku = String(e.codigo).padStart(6, "0");
+      const p = await terasoftSKU(sku);
+      if (!p) continue;
+      await fetch(SB + "?codigo=eq." + e.codigo, {
+        method: "PATCH",
+        headers: { apikey: SVC, Authorization: "Bearer " + SVC,
+                   "Content-Type": "application/json", Prefer: "return=minimal" },
+        body: JSON.stringify({
+          estoque: Number(p.ESTOQUE) || 0,
+          preco: p.VENDA === null || p.VENDA === undefined ? null : String(p.VENDA),
+          descricao: p.DESCRICAO || "",
+          material: derivaBanho(p.DESCRICAO, null),
+        }),
+      });
+      z++;
+      console.log(`   conferido na mão: ${sku} -> estoque ${Number(p.ESTOQUE) || 0}`);
+    }
+  } catch (e) {
+    console.log("Não consegui conferir os esquecidos:", e.message);
+  }
+
+  console.log(`OK. ${a + b + z} produtos gravados em ${Math.round((Date.now() - t0) / 1000)}s`);
 })().catch((e) => { console.error("ERRO:", e.message); process.exit(1); });
