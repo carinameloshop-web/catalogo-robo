@@ -197,7 +197,7 @@ function terasoftSKU(sku) {
 async function lerAtual() {
   const mapa = new Map();
   for (let off = 0; ; off += 1000) {
-    const r = await fetch(SB + "?select=codigo,estoque,preco,tipo,material,grupo&limit=1000&offset=" + off, {
+    const r = await fetch(SB + "?select=codigo,estoque,preco,tipo,material,grupo,marca,descricao&limit=1000&offset=" + off, {
       headers: { apikey: SVC, Authorization: "Bearer " + SVC },
     });
     const d = await r.json();
@@ -206,6 +206,7 @@ async function lerAtual() {
       estoque: Number(x.estoque) || 0,
       preco: x.preco === null ? null : String(x.preco),
       tipo: x.tipo || null, material: x.material || null, grupo: x.grupo || null,
+      marca: x.marca || "", descricao: x.descricao || "",
     }));
     if (d.length < 1000) break;
   }
@@ -317,9 +318,14 @@ async function inserirTodos(linhas) {
 
     const antes = atual.get(String(cod));
     if (antes) {
+      // MARCA entra aqui porque marca = COLEÇÃO, e coleção é o que organiza a
+      // operação inteira da Carina Melo. Em 01/09/2026 ela renomeou "07 - HEDILAINE"
+      // para "07 - CARINA" na Terasoft e o catálogo continuou com o nome velho,
+      // porque eu só comparava estoque, preço, grupo, tipo e banho.
       const mudou = antes.estoque !== linha.estoque || antes.preco !== linha.preco
                  || antes.grupo !== linha.grupo || antes.tipo !== linha.tipo
-                 || antes.material !== linha.material;
+                 || antes.material !== linha.material
+                 || antes.marca !== linha.marca || antes.descricao !== linha.descricao;
       if (mudou) atualizar.push(linha);
     } else {
       inserir.push(linha);
