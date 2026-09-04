@@ -8,7 +8,11 @@ const GKEY = process.env.GOOGLE_API_KEY;
 const SVC = process.env.SUPABASE_SERVICE_KEY;
 const DRY = process.env.DRY === "1";
 const SB = "https://dqljtdznecqzninwvtsj.supabase.co/rest/v1/produtos";
-const FOLDERS = ["11ibI_41F9-S6d4gjVIN_bXGsOtLou7AV", "1mOffDv1VkstcmSm1VAMbntevLKQ6lFnL"];
+const FOLDERS = [
+  "11ibI_41F9-S6d4gjVIN_bXGsOtLou7AV",
+  "1mOffDv1VkstcmSm1VAMbntevLKQ6lFnL",
+  "1DIHkbdJG8ouPWrBHimCxPhNddDvXrjBm",  // PERSONALIZADOS - 2026 (04/09/2026)
+];
 
 if (!GKEY) { console.error("Faltou GOOGLE_API_KEY"); process.exit(1); }
 if (!SVC) { console.error("Faltou SUPABASE_SERVICE_KEY"); process.exit(1); }
