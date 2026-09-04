@@ -51,6 +51,7 @@ async function sbSet(codigo, foto) {
   const t0 = Date.now();
   const principal = new Map(); // codigo -> fileId (foto do produto)
   const modelo = new Map();    // codigo -> fileId (foto na modelo)
+  const dono = new Map();      // fileId -> códigos que o NOME do arquivo reivindica
   for (const f of FOLDERS) {
     const files = await listFolder(f); // já vem do mais recente p/ o mais antigo
     for (const file of files) {
@@ -58,10 +59,20 @@ async function sbSet(codigo, foto) {
       if (/^\d+(-\d+)*$/.test(base)) {            // "5010" ou "5010-5011" -> foto principal
         // tira o zero da frente: no Drive vem "005317", no catálogo o código é 5317.
         // Sem isso o robô procura um produto "005317", não acha, e a foto some em silêncio.
-        for (const n of base.split("-")) { const c = String(Number(n)); if (!principal.has(c)) principal.set(c, file.id); }
+        for (const n of base.split("-")) {
+          const c = String(Number(n));
+          if (!principal.has(c)) principal.set(c, file.id);
+          if (!dono.has(file.id)) dono.set(file.id, new Set());
+          dono.get(file.id).add(c);
+        }
       } else {
         const mm = base.match(/^(\d+)\s+[a-zA-Z]/); // "5010 modelo" -> 2ª foto do 5010
-        if (mm) { const c = String(Number(mm[1])); if (!modelo.has(c)) modelo.set(c, file.id); }
+        if (mm) {
+          const c = String(Number(mm[1]));
+          if (!modelo.has(c)) modelo.set(c, file.id);
+          if (!dono.has(file.id)) dono.set(file.id, new Set());
+          dono.get(file.id).add(c);
+        }
         // qualquer outro nome (logo, lixo, "5550 (2)") é ignorado
       }
     }
@@ -83,6 +94,24 @@ async function sbSet(codigo, foto) {
     if (DRY) { novas++; continue; }
     if (await sbSet(cod, val)) novas++;
   }
-  console.log((DRY ? "A ATUALIZAR: " : "ATUALIZADAS: ") + novas, "| já certas:", iguais, "| código sem produto:", semProduto,
+  // Quando alguém RENOMEIA um arquivo no Drive porque a foto era de outra peça
+  // (o "8050" virou "8058" em 04/09/2026), o robô grava a foto no código novo —
+  // mas o código antigo fica apontando pra imagem errada pra sempre. O catálogo
+  // mostrava um bracelete no lugar de um berloque. Aqui isso se desfaz sozinho.
+  //
+  // A regra é estreita de propósito: só apaga quando o arquivo AINDA EXISTE nas
+  // pastas e o nome dele é de OUTRO código. Foto cujo arquivo não está nessas
+  // pastas fica quieta — há 8 fotos assim, e todas estão certas.
+  let limpas = 0;
+  for (const [cod, val] of atual) {
+    if (!val || desejado.has(cod)) continue;
+    const errada = val.split(",").some((id) => dono.has(id) && !dono.get(id).has(cod));
+    if (!errada) continue;
+    console.log("  foto de outra peça, limpando:", cod, "->", val);
+    if (DRY) { limpas++; continue; }
+    if (await sbSet(cod, null)) limpas++;
+  }
+
+  console.log((DRY ? "A ATUALIZAR: " : "ATUALIZADAS: ") + novas, "| já certas:", iguais, "| fotos erradas limpas:", limpas, "| código sem produto:", semProduto,
     "| tempo:", Math.round((Date.now() - t0) / 1000) + "s");
 })().catch((e) => { console.error("erro:", e.message); process.exit(1); });
