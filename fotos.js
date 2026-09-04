@@ -56,10 +56,12 @@ async function sbSet(codigo, foto) {
     for (const file of files) {
       const base = file.name.replace(/\.[a-z0-9]+$/i, "").trim();
       if (/^\d+(-\d+)*$/.test(base)) {            // "5010" ou "5010-5011" -> foto principal
-        for (const n of base.split("-")) if (!principal.has(n)) principal.set(n, file.id);
+        // tira o zero da frente: no Drive vem "005317", no catálogo o código é 5317.
+        // Sem isso o robô procura um produto "005317", não acha, e a foto some em silêncio.
+        for (const n of base.split("-")) { const c = String(Number(n)); if (!principal.has(c)) principal.set(c, file.id); }
       } else {
         const mm = base.match(/^(\d+)\s+[a-zA-Z]/); // "5010 modelo" -> 2ª foto do 5010
-        if (mm && !modelo.has(mm[1])) modelo.set(mm[1], file.id);
+        if (mm) { const c = String(Number(mm[1])); if (!modelo.has(c)) modelo.set(c, file.id); }
         // qualquer outro nome (logo, lixo, "5550 (2)") é ignorado
       }
     }
