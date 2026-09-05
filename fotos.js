@@ -8,11 +8,15 @@ const GKEY = process.env.GOOGLE_API_KEY;
 const SVC = process.env.SUPABASE_SERVICE_KEY;
 const DRY = process.env.DRY === "1";
 const SB = "https://dqljtdznecqzninwvtsj.supabase.co/rest/v1/produtos";
+const SBM = "https://dqljtdznecqzninwvtsj.supabase.co/rest/v1/modelo_banhos";
 const FOLDERS = [
   "11ibI_41F9-S6d4gjVIN_bXGsOtLou7AV",
   "1mOffDv1VkstcmSm1VAMbntevLKQ6lFnL",
   "1DIHkbdJG8ouPWrBHimCxPhNddDvXrjBm",  // PERSONALIZADOS - 2026 (04/09/2026)
 ];
+// Esta pasta é especial: a foto dentro dela É a aprovação do modelo de
+// personalizado. Só aparece pra afiliada o código que estiver aqui.
+const PASTA_PERSONALIZADOS = "1DIHkbdJG8ouPWrBHimCxPhNddDvXrjBm";
 
 if (!GKEY) { console.error("Faltou GOOGLE_API_KEY"); process.exit(1); }
 if (!SVC) { console.error("Faltou SUPABASE_SERVICE_KEY"); process.exit(1); }
@@ -56,6 +60,7 @@ async function sbSet(codigo, foto) {
   const principal = new Map(); // codigo -> fileId (foto do produto)
   const modelo = new Map();    // codigo -> fileId (foto na modelo)
   const dono = new Map();      // fileId -> códigos que o NOME do arquivo reivindica
+  const modelos = new Set();   // códigos que estão na pasta dos personalizados
   for (const f of FOLDERS) {
     const files = await listFolder(f); // já vem do mais recente p/ o mais antigo
     for (const file of files) {
@@ -68,6 +73,7 @@ async function sbSet(codigo, foto) {
           if (!principal.has(c)) principal.set(c, file.id);
           if (!dono.has(file.id)) dono.set(file.id, new Set());
           dono.get(file.id).add(c);
+          if (f === PASTA_PERSONALIZADOS) modelos.add(Number(c));
         }
       } else {
         const mm = base.match(/^(\d+)\s+[a-zA-Z]/); // "5010 modelo" -> 2ª foto do 5010
@@ -76,6 +82,7 @@ async function sbSet(codigo, foto) {
           if (!modelo.has(c)) modelo.set(c, file.id);
           if (!dono.has(file.id)) dono.set(file.id, new Set());
           dono.get(file.id).add(c);
+          if (f === PASTA_PERSONALIZADOS) modelos.add(Number(c));
         }
         // qualquer outro nome (logo, lixo, "5550 (2)") é ignorado
       }
@@ -115,6 +122,44 @@ async function sbSet(codigo, foto) {
     if (DRY) { limpas++; continue; }
     if (await sbSet(cod, null)) limpas++;
   }
+
+  // ---- os modelos de personalizado
+  // Pôr a foto na pasta é o que aprova o modelo; tirar é o que despublica.
+  // Não é preciso lista nenhuma, nem revisão de 1.237 códigos.
+  // Aqui só se liga e desliga: os banhos que cada modelo aceita quem decide
+  // é a Carina, na tela de gestão, e este robô nunca mexe neles.
+  let mNovos = 0, mLigados = 0, mDesligados = 0;
+  try {
+    const r = await fetch(SBM + "?select=codigo,ativo", { headers: { apikey: SVC, Authorization: "Bearer " + SVC } });
+    const atuaisM = await r.json();
+    const jaTem = new Map(atuaisM.map((m) => [Number(m.codigo), m.ativo]));
+    const faltando = [...modelos].filter((c) => !jaTem.has(c));
+    if (faltando.length && !DRY) {
+      // ouro e paládio ligados, steel desligado: steel é a exceção.
+      // ouro branco não existe em personalizado, então nem é campo.
+      await fetch(SBM, {
+        method: "POST",
+        headers: { apikey: SVC, Authorization: "Bearer " + SVC, "Content-Type": "application/json", Prefer: "return=minimal" },
+        body: JSON.stringify(faltando.map((c) => ({ codigo: c }))),
+      });
+    }
+    mNovos = faltando.length;
+    for (const [c, ativo] of jaTem) {
+      const deveria = modelos.has(c);
+      if (deveria === ativo) continue;
+      if (deveria) mLigados++; else mDesligados++;
+      if (DRY) continue;
+      await fetch(SBM + "?codigo=eq." + c, {
+        method: "PATCH",
+        headers: { apikey: SVC, Authorization: "Bearer " + SVC, "Content-Type": "application/json", Prefer: "return=minimal" },
+        body: JSON.stringify({ ativo: deveria }),
+      });
+    }
+  } catch (e) {
+    console.error("  modelos de personalizado: falhou,", e.message);
+  }
+  console.log("Modelos de personalizado:", modelos.size, "na pasta | novos:", mNovos,
+              "| religados:", mLigados, "| desligados:", mDesligados);
 
   console.log((DRY ? "A ATUALIZAR: " : "ATUALIZADAS: ") + novas, "| já certas:", iguais, "| fotos erradas limpas:", limpas, "| código sem produto:", semProduto,
     "| tempo:", Math.round((Date.now() - t0) / 1000) + "s");
