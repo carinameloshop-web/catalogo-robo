@@ -128,38 +128,77 @@ async function sbSet(codigo, foto) {
   // Não é preciso lista nenhuma, nem revisão de 1.237 códigos.
   // Aqui só se liga e desliga: os banhos que cada modelo aceita quem decide
   // é a Carina, na tela de gestão, e este robô nunca mexe neles.
-  let mNovos = 0, mLigados = 0, mDesligados = 0;
+  let mNovos = 0, mLigados = 0, mDesligados = 0, mRecusados = 0;
   try {
-    const r = await fetch(SBM + "?select=codigo,ativo", { headers: { apikey: SVC, Authorization: "Bearer " + SVC } });
-    const atuaisM = await r.json();
+    const cab2 = { apikey: SVC, Authorization: "Bearer " + SVC };
+    const cab3 = { ...cab2, "Content-Type": "application/json", Prefer: "return=minimal" };
+
+    // ---- a trava do código descontinuado
+    // Descontinuado quer dizer que o código mudou. A foto colada no código
+    // velho traz o PREÇO velho junto, e a afiliada mostra menos do que a peça
+    // custa hoje. Aconteceu em 07/09/2026 com 13 modelos, R$ 177 no lugar de
+    // R$ 219. Aqui o modelo é recusado e a nota já diz pra qual código
+    // renomear a foto, achando o substituto pela descrição idêntica.
+    const cods = [...modelos];
+    const marcas = new Map();
+    for (let i = 0; i < cods.length; i += 200) {
+      const p = await (await fetch(SB + "?codigo=in.(" + cods.slice(i, i + 200).join(",")
+        + ")&select=codigo,descricao,marca", { headers: cab2 })).json();
+      for (const x of p) marcas.set(Number(x.codigo), x);
+    }
+    const normal = (d) => String(d || "").toUpperCase().replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+    const ruins = [...modelos].filter((c) => /DESCONTINUADO|INSUMO/i.test((marcas.get(c) || {}).marca || ""));
+    const bons = new Set([...modelos].filter((c) => !ruins.includes(c)));
+
+    // pra cada recusado, procura o código novo com a mesma descrição
+    const nota = new Map();
+    for (const c of ruins) {
+      const d = normal((marcas.get(c) || {}).descricao);
+      let sub = "";
+      if (d) {
+        const iguais = await (await fetch(SB + "?select=codigo,descricao,marca&descricao=ilike."
+          + encodeURIComponent("*" + String((marcas.get(c) || {}).descricao || "").slice(0, 40) + "*"),
+          { headers: cab2 })).json();
+        const achou = (iguais || []).find((x) => Number(x.codigo) !== c
+          && normal(x.descricao) === d && !/DESCONTINUADO|INSUMO/i.test(x.marca || ""));
+        if (achou) sub = String(achou.codigo).padStart(6, "0");
+      }
+      nota.set(c, sub ? "código descontinuado. Renomear a foto para " + sub
+                     : "código descontinuado. Procurar o código novo desta peça.");
+      console.log("  RECUSADO:", String(c).padStart(6, "0"), "->", nota.get(c));
+    }
+    mRecusados = ruins.length;
+
+    const atuaisM = await (await fetch(SBM + "?select=codigo,ativo", { headers: cab2 })).json();
     const jaTem = new Map(atuaisM.map((m) => [Number(m.codigo), m.ativo]));
     const faltando = [...modelos].filter((c) => !jaTem.has(c));
     if (faltando.length && !DRY) {
       // ouro e paládio ligados, steel desligado: steel é a exceção.
       // ouro branco não existe em personalizado, então nem é campo.
       await fetch(SBM, {
-        method: "POST",
-        headers: { apikey: SVC, Authorization: "Bearer " + SVC, "Content-Type": "application/json", Prefer: "return=minimal" },
-        body: JSON.stringify(faltando.map((c) => ({ codigo: c }))),
+        method: "POST", headers: cab3,
+        body: JSON.stringify(faltando.map((c) => ({
+          codigo: c, ativo: bons.has(c), nota: nota.get(c) || null,
+        }))),
       });
     }
     mNovos = faltando.length;
     for (const [c, ativo] of jaTem) {
-      const deveria = modelos.has(c);
+      const deveria = bons.has(c);
       if (deveria === ativo) continue;
       if (deveria) mLigados++; else mDesligados++;
       if (DRY) continue;
       await fetch(SBM + "?codigo=eq." + c, {
-        method: "PATCH",
-        headers: { apikey: SVC, Authorization: "Bearer " + SVC, "Content-Type": "application/json", Prefer: "return=minimal" },
-        body: JSON.stringify({ ativo: deveria }),
+        method: "PATCH", headers: cab3,
+        body: JSON.stringify({ ativo: deveria, nota: nota.get(c) || null }),
       });
     }
   } catch (e) {
     console.error("  modelos de personalizado: falhou,", e.message);
   }
   console.log("Modelos de personalizado:", modelos.size, "na pasta | novos:", mNovos,
-              "| religados:", mLigados, "| desligados:", mDesligados);
+              "| religados:", mLigados, "| desligados:", mDesligados,
+              "| RECUSADOS por código descontinuado:", mRecusados);
 
   console.log((DRY ? "A ATUALIZAR: " : "ATUALIZADAS: ") + novas, "| já certas:", iguais, "| fotos erradas limpas:", limpas, "| código sem produto:", semProduto,
     "| tempo:", Math.round((Date.now() - t0) / 1000) + "s");
