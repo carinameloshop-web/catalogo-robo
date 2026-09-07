@@ -128,7 +128,7 @@ async function sbSet(codigo, foto) {
   // Não é preciso lista nenhuma, nem revisão de 1.237 códigos.
   // Aqui só se liga e desliga: os banhos que cada modelo aceita quem decide
   // é a Carina, na tela de gestão, e este robô nunca mexe neles.
-  let mNovos = 0, mLigados = 0, mDesligados = 0, mRecusados = 0;
+  let mNovos = 0, mLigados = 0, mDesligados = 0, mRecusados = 0, mLimpos = 0;
   try {
     const cab2 = { apikey: SVC, Authorization: "Bearer " + SVC };
     const cab3 = { ...cab2, "Content-Type": "application/json", Prefer: "return=minimal" };
@@ -169,7 +169,7 @@ async function sbSet(codigo, foto) {
     }
     mRecusados = ruins.length;
 
-    const atuaisM = await (await fetch(SBM + "?select=codigo,ativo", { headers: cab2 })).json();
+    const atuaisM = await (await fetch(SBM + "?select=codigo,ativo,nota", { headers: cab2 })).json();
     const jaTem = new Map(atuaisM.map((m) => [Number(m.codigo), m.ativo]));
     const faltando = [...modelos].filter((c) => !jaTem.has(c));
     if (faltando.length && !DRY) {
@@ -183,14 +183,20 @@ async function sbSet(codigo, foto) {
       });
     }
     mNovos = faltando.length;
+    // A nota só faz sentido enquanto o arquivo ruim ainda está na pasta. Quando
+    // ele sai (renomeado ou apagado), a nota tem que sair junto, senão o aviso
+    // vermelho fica pra sempre e ninguém acredita nele depois.
+    const notaAtual = new Map(atuaisM.map((m) => [Number(m.codigo), m.nota || null]));
     for (const [c, ativo] of jaTem) {
       const deveria = bons.has(c);
-      if (deveria === ativo) continue;
-      if (deveria) mLigados++; else mDesligados++;
+      const notaNova = modelos.has(c) ? (nota.get(c) || null) : null;
+      if (deveria === ativo && notaNova === notaAtual.get(c)) continue;
+      if (deveria !== ativo) { if (deveria) mLigados++; else mDesligados++; }
+      if (notaNova === null && notaAtual.get(c)) mLimpos++;
       if (DRY) continue;
       await fetch(SBM + "?codigo=eq." + c, {
         method: "PATCH", headers: cab3,
-        body: JSON.stringify({ ativo: deveria, nota: nota.get(c) || null }),
+        body: JSON.stringify({ ativo: deveria, nota: notaNova }),
       });
     }
   } catch (e) {
@@ -198,7 +204,8 @@ async function sbSet(codigo, foto) {
   }
   console.log("Modelos de personalizado:", modelos.size, "na pasta | novos:", mNovos,
               "| religados:", mLigados, "| desligados:", mDesligados,
-              "| RECUSADOS por código descontinuado:", mRecusados);
+              "| RECUSADOS por código descontinuado:", mRecusados,
+              "| avisos resolvidos:", mLimpos);
 
   console.log((DRY ? "A ATUALIZAR: " : "ATUALIZADAS: ") + novas, "| já certas:", iguais, "| fotos erradas limpas:", limpas, "| código sem produto:", semProduto,
     "| tempo:", Math.round((Date.now() - t0) / 1000) + "s");
