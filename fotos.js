@@ -4,6 +4,8 @@
 //   "5010-5011-5012"  -> mesma foto principal p/ vários códigos
 //   "5010 modelo"     -> 2ª foto (na modelo) do código 5010 (nome com letra = 2ª foto)
 // Grava foto = "idPrincipal[,idModelo]" (separado por vírgula). Senhas via env (secrets).
+const { classificar } = require("./categorias-personalizados");
+
 const GKEY = process.env.GOOGLE_API_KEY;
 const SVC = process.env.SUPABASE_SERVICE_KEY;
 const DRY = process.env.DRY === "1";
@@ -179,6 +181,10 @@ async function sbSet(codigo, foto) {
         method: "POST", headers: cab3,
         body: JSON.stringify(faltando.map((c) => ({
           codigo: c, ativo: bons.has(c), nota: nota.get(c) || null,
+          // Modelo novo ja nasce classificado. A Carina corrige na tela de
+          // gestao o que a regra errar, e o robo nunca desfaz a correcao dela:
+          // so classifica quem ainda nao tem categoria nenhuma.
+          categorias: classificar((marcas.get(c) || {}).descricao || ""),
         }))),
       });
     }
