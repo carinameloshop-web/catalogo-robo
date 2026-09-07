@@ -27,16 +27,29 @@ const PASTA_PERSONALIZADOS = "1DIHkbdJG8ouPWrBHimCxPhNddDvXrjBm";
 if (!GKEY) { console.error("Faltou GOOGLE_API_KEY"); process.exit(1); }
 if (!SVC) { console.error("Faltou SUPABASE_SERVICE_KEY"); process.exit(1); }
 
+// Aceita tambem ATALHO do Drive: a pasta da Aurora Muniz veio com 31 fotos
+// postas como atalho, e atalho nao e "image/" — o filtro antigo largava todas
+// pra tras em silencio. Aqui o atalho e trocado pelo arquivo que ele aponta,
+// mantendo o NOME do atalho (e o nome que carrega o codigo da peca).
+const MIME_ATALHO = "application/vnd.google-apps.shortcut";
 async function listFolder(folder) {
   let files = [], token = "";
   do {
-    const q = "'" + folder + "' in parents and mimeType contains 'image/' and trashed=false";
+    const q = "'" + folder + "' in parents and (mimeType contains 'image/'"
+      + " or mimeType = '" + MIME_ATALHO + "') and trashed=false";
     const url = "https://www.googleapis.com/drive/v3/files?q=" + encodeURIComponent(q) +
-      "&key=" + GKEY + "&fields=nextPageToken,files(id,name,modifiedTime)" +
+      "&key=" + GKEY + "&fields=nextPageToken,files(id,name,modifiedTime,mimeType,"
+      + "shortcutDetails(targetId,targetMimeType))" +
       "&orderBy=modifiedTime desc&pageSize=1000" + (token ? "&pageToken=" + token : "");
     const j = await (await fetch(url)).json();
     if (j.error) throw new Error("Drive: " + j.error.message);
-    files = files.concat(j.files || []);
+    for (const f of (j.files || [])) {
+      if (f.mimeType !== MIME_ATALHO) { files.push(f); continue; }
+      const alvo = f.shortcutDetails || {};
+      // atalho pra coisa que nao e imagem (pasta, documento) nao interessa
+      if (!alvo.targetId || !String(alvo.targetMimeType || "").startsWith("image/")) continue;
+      files.push({ id: alvo.targetId, name: f.name, modifiedTime: f.modifiedTime });
+    }
     token = j.nextPageToken || "";
   } while (token);
   return files;
