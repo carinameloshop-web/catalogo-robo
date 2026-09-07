@@ -15,6 +15,10 @@ const FOLDERS = [
   "11ibI_41F9-S6d4gjVIN_bXGsOtLou7AV",
   "1mOffDv1VkstcmSm1VAMbntevLKQ6lFnL",
   "1DIHkbdJG8ouPWrBHimCxPhNddDvXrjBm",  // PERSONALIZADOS - 2026 (04/09/2026)
+  // FOTOS COM CODIGOS AURORA MUNIZ (07/09/2026) — abastece o catálogo da
+  // Aurora (catalogo-aurora.vercel.app). São 136 arquivos / 130 códigos, todos
+  // de marca AURORA, então nenhuma foto daqui cai no catálogo da Carina Melo.
+  "1X1i-x19M-H6cEoWmwNAByaLMOtbiVCPQ",
 ];
 // Esta pasta é especial: a foto dentro dela É a aprovação do modelo de
 // personalizado. Só aparece pra afiliada o código que estiver aqui.
