@@ -27,29 +27,16 @@ const PASTA_PERSONALIZADOS = "1DIHkbdJG8ouPWrBHimCxPhNddDvXrjBm";
 if (!GKEY) { console.error("Faltou GOOGLE_API_KEY"); process.exit(1); }
 if (!SVC) { console.error("Faltou SUPABASE_SERVICE_KEY"); process.exit(1); }
 
-// Aceita tambem ATALHO do Drive: a pasta da Aurora Muniz veio com 31 fotos
-// postas como atalho, e atalho nao e "image/" — o filtro antigo largava todas
-// pra tras em silencio. Aqui o atalho e trocado pelo arquivo que ele aponta,
-// mantendo o NOME do atalho (e o nome que carrega o codigo da peca).
-const MIME_ATALHO = "application/vnd.google-apps.shortcut";
 async function listFolder(folder) {
   let files = [], token = "";
   do {
-    const q = "'" + folder + "' in parents and (mimeType contains 'image/'"
-      + " or mimeType = '" + MIME_ATALHO + "') and trashed=false";
+    const q = "'" + folder + "' in parents and mimeType contains 'image/' and trashed=false";
     const url = "https://www.googleapis.com/drive/v3/files?q=" + encodeURIComponent(q) +
-      "&key=" + GKEY + "&fields=nextPageToken,files(id,name,modifiedTime,mimeType,"
-      + "shortcutDetails(targetId,targetMimeType))" +
+      "&key=" + GKEY + "&fields=nextPageToken,files(id,name,modifiedTime)" +
       "&orderBy=modifiedTime desc&pageSize=1000" + (token ? "&pageToken=" + token : "");
     const j = await (await fetch(url)).json();
     if (j.error) throw new Error("Drive: " + j.error.message);
-    for (const f of (j.files || [])) {
-      if (f.mimeType !== MIME_ATALHO) { files.push(f); continue; }
-      const alvo = f.shortcutDetails || {};
-      // atalho pra coisa que nao e imagem (pasta, documento) nao interessa
-      if (!alvo.targetId || !String(alvo.targetMimeType || "").startsWith("image/")) continue;
-      files.push({ id: alvo.targetId, name: f.name, modifiedTime: f.modifiedTime });
-    }
+    files = files.concat(j.files || []);
     token = j.nextPageToken || "";
   } while (token);
   return files;
@@ -229,6 +216,20 @@ async function sbSet(codigo, foto) {
               "| religados:", mLigados, "| desligados:", mDesligados,
               "| RECUSADOS por código descontinuado:", mRecusados,
               "| avisos resolvidos:", mLimpos);
+
+  // Deixa registrado que rodou. Robo que para nao avisa: e o painel que
+  // avisa por ele, mostrando ha quantas horas foi a ultima passada.
+  if (!DRY) {
+    try {
+      await fetch("https://dqljtdznecqzninwvtsj.supabase.co/rest/v1/robo_estado?on_conflict=robo", {
+        method: "POST",
+        headers: { apikey: SVC, Authorization: "Bearer " + SVC, "Content-Type": "application/json",
+                   Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify([{ robo: "fotos", quando: new Date().toISOString(),
+          resumo: novas + " fotos novas, " + modelos.size + " modelos de personalizado" }]),
+      });
+    } catch (e) { /* nao e motivo pra derrubar a rodada */ }
+  }
 
   console.log((DRY ? "A ATUALIZAR: " : "ATUALIZADAS: ") + novas, "| já certas:", iguais, "| fotos erradas limpas:", limpas, "| código sem produto:", semProduto,
     "| tempo:", Math.round((Date.now() - t0) / 1000) + "s");
