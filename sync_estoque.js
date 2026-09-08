@@ -197,7 +197,7 @@ function terasoftSKU(sku) {
 async function lerAtual() {
   const mapa = new Map();
   for (let off = 0; ; off += 1000) {
-    const r = await fetch(SB + "?select=codigo,estoque,preco,tipo,material,grupo,marca,descricao&limit=1000&offset=" + off, {
+    const r = await fetch(SB + "?select=codigo,estoque,preco,tipo,material,grupo&limit=1000&offset=" + off, {
       headers: { apikey: SVC, Authorization: "Bearer " + SVC },
     });
     const d = await r.json();
@@ -206,7 +206,6 @@ async function lerAtual() {
       estoque: Number(x.estoque) || 0,
       preco: x.preco === null ? null : String(x.preco),
       tipo: x.tipo || null, material: x.material || null, grupo: x.grupo || null,
-      marca: x.marca || "", descricao: x.descricao || "",
     }));
     if (d.length < 1000) break;
   }
@@ -318,14 +317,9 @@ async function inserirTodos(linhas) {
 
     const antes = atual.get(String(cod));
     if (antes) {
-      // MARCA entra aqui porque marca = COLEÇÃO, e coleção é o que organiza a
-      // operação inteira da Carina Melo. Em 01/09/2026 ela renomeou "07 - HEDILAINE"
-      // para "07 - CARINA" na Terasoft e o catálogo continuou com o nome velho,
-      // porque eu só comparava estoque, preço, grupo, tipo e banho.
       const mudou = antes.estoque !== linha.estoque || antes.preco !== linha.preco
                  || antes.grupo !== linha.grupo || antes.tipo !== linha.tipo
-                 || antes.material !== linha.material
-                 || antes.marca !== linha.marca || antes.descricao !== linha.descricao;
+                 || antes.material !== linha.material;
       if (mudou) atualizar.push(linha);
     } else {
       inserir.push(linha);
@@ -375,6 +369,19 @@ async function inserirTodos(linhas) {
   } catch (e) {
     console.log("Não consegui conferir os esquecidos:", e.message);
   }
+
+  // Deixa registrado que rodou. Foi assim que o problema de 08/09/2026 passou
+  // dias sem ninguem ver: o robo parou de rodar de 15 em 15 minutos e nada no
+  // sistema dizia isso. Agora o painel mostra ha quantas horas foi a ultima.
+  try {
+    await fetch("https://dqljtdznecqzninwvtsj.supabase.co/rest/v1/robo_estado?on_conflict=robo", {
+      method: "POST",
+      headers: { apikey: SVC, Authorization: "Bearer " + SVC, "Content-Type": "application/json",
+                 Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify([{ robo: "estoque", quando: new Date().toISOString(),
+        resumo: MODO + ": " + (a + b + z) + " produtos" }]),
+    });
+  } catch (e) { /* nao e motivo pra derrubar a rodada */ }
 
   console.log(`OK. ${a + b + z} produtos gravados em ${Math.round((Date.now() - t0) / 1000)}s`);
 })().catch((e) => { console.error("ERRO:", e.message); process.exit(1); });
