@@ -1,8 +1,22 @@
 name: Atualiza estoque do catálogo
 
+# O GitHub NÃO garante o */15. Medido em 08/09/2026: o robô rodou de 4 em 4
+# horas e meia, não de 15 em 15 minutos. Com janela de 60 minutos, ele
+# perguntava "o que mudou na última hora" a cada quase 5 horas, e as outras 4
+# horas de mudança sumiam pra sempre. Deu 140 produtos com estoque errado no
+# catálogo em um único dia, sendo 9 peças fotografadas que existiam de verdade
+# e a afiliada não conseguia ver.
+#
+# Conserto: a janela passa a ser de 24 horas. Custa uma consulta só (a Terasoft
+# devolve ~1.600 alterações por dia, o que é nada) e sobrevive a qualquer atraso
+# do GitHub. Se ele rodar uma vez por dia, ainda assim não perde nada.
+#
+# E uma vez por dia, de madrugada, roda a base inteira como rede de segurança.
+
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/15 * * * *'    # de quanto em quanto o GitHub deixar
+    - cron: '0 6 * * *'       # 03h de Brasília: base inteira
   workflow_dispatch:
     inputs:
       modo:
@@ -25,5 +39,5 @@ jobs:
         env:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           TERASOFT_AUTH: ${{ secrets.TERASOFT_AUTH }}
-          MODO: ${{ github.event.inputs.modo || 'incremental' }}
-          JANELA_MIN: '60'
+          MODO: ${{ github.event.inputs.modo || (github.event.schedule == '0 6 * * *' && 'full' || 'incremental') }}
+          JANELA_MIN: '1440'
