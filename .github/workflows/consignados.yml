@@ -1,0 +1,33 @@
+name: Consignados e maletas
+
+# Toda madrugada traz os consignados da Terasoft, mantém o espelho que o
+# painel da manhã lê e abre maleta pra quem tem peça na mão. Ver consignados.js.
+#
+# 04h30 de Brasília: depois da base inteira do estoque (03h) e antes de a
+# Carina e a Iza chegarem. O GitHub atrasa cron às vezes; uma vez por dia
+# aguenta qualquer atraso.
+#
+# REPOSITÓRIO PÚBLICO: o log desta rodada é visível pra qualquer um. O robô só
+# imprime contagens, nunca nome, valor ou número de consignado.
+
+on:
+  schedule:
+    - cron: '30 7 * * *'
+  workflow_dispatch:
+
+jobs:
+  consignados:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Baixar os arquivos
+        uses: actions/checkout@v7
+      - name: Preparar Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Consignados e maletas
+        run: node consignados.js
+        env:
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TERASOFT_AUTH: ${{ secrets.TERASOFT_AUTH }}
