@@ -127,7 +127,11 @@ const R_VENDA = /\bvendi\b|\bvendeu\b|\bcomprou\b|\blevou\b|\bvendid[ao]\b|\bfia
     const t = tel(a.whatsapp);
     let cands = t ? [...info.entries()].filter(([, g]) => g.participantes.some((p) => p.tel === t)) : [];
     let peloNome = false;
-    if (!cands.length) {
+    // Grupo já gravado (inclusive o que a Carina apontou à mão, como o "Pedidos
+    // Fran Floresta" da Franciele em 14/09) vale enquanto ela estiver nele.
+    const fixo = a.grupo_whatsapp && info.get(a.grupo_whatsapp);
+    if (fixo && (!t || fixo.participantes.some((p) => p.tel === t))) cands = [[a.grupo_whatsapp, fixo]];
+    else if (!cands.length) {
       // Sem telefone (ou telefone que não está em grupo nenhum): primeiro nome
       // mais um sobrenome ou a cidade no nome do grupo, e só se for um grupo só.
       const nomes = limpar(a.nome).split(" ").filter((w) => w.length > 2 && !["DOS", "DAS"].includes(w));
@@ -146,7 +150,7 @@ const R_VENDA = /\bvendi\b|\bvendeu\b|\bcomprou\b|\blevou\b|\bvendid[ao]\b|\bfia
     // grupo; só sem nenhum assim vale o mais movimentado.
     const primeiro = limpar(a.nome).split(" ")[0];
     const comNome = cands.filter(([, g]) => limpar(g.nome).split(" ").includes(primeiro));
-    if (comNome.length) cands = comNome;
+    if (comNome.length && !fixo) cands = comNome;
     cands.sort((x, y) => y[1].ultima - x[1].ultima);
     const [jid, g] = cands[0];
     a._grupo = jid;
