@@ -166,13 +166,36 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
   // ---- 3. espelho dos consignados (só colunas do robô: merge não apaga o que a Iza preencheu)
   const guardar = todos.filter((c) => c.situacao === "ABERTO"
     || c.data_saida >= new Date(hoje.getTime() - 120 * 86400000).toISOString().slice(0, 10));
+  // TRANSFERÊNCIA: peça que a afiliada segura pro mês seguinte sai num
+  // consignado NOVO e pequeno, e a data de saída dele faz a peça parecer nova.
+  // Foi assim que a Amabile acumulou R$ 12 mil em 8 meses sem ninguém ver.
+  // Regra dura da Carina (14/09/2026): 60 dias do recebimento da PEÇA, e
+  // transferência nunca zera o relógio. Padrão: consignado aberto com até 8
+  // peças, todas presentes no último consignado CONCLUÍDO grande dela.
+  const porVendedor = new Map();
+  for (const c of todos) {
+    if (!porVendedor.has(c.codigo_vendedor)) porVendedor.set(c.codigo_vendedor, []);
+    porVendedor.get(c.codigo_vendedor).push(c);
+  }
+  for (const c of abertos) {
+    if (c.codigo_vendedor === ESTOQUE_CICLICO || c.itens.size > 8) continue;
+    const antes = porVendedor.get(c.codigo_vendedor)
+      .filter((p) => p.numero !== c.numero && p.data_saida < c.data_saida && p.situacao === "CONCLUIDO" && p.itens.size > 8)
+      .sort((x, y) => x.data_saida.localeCompare(y.data_saida));
+    const prev = antes[antes.length - 1];
+    if (prev && [...c.itens.keys()].every((k) => prev.itens.has(k))) c.origem = prev;
+  }
+
   const linhas = guardar.map((c) => ({
     numero: c.numero, codigo_vendedor: c.codigo_vendedor,
     afiliada_id: (porCodigo.get(c.codigo_vendedor) || {}).id || null,
     data_saida: c.data_saida, situacao: c.situacao,
     valor_total: c.valor_total, valor_pendente: c.pendenteNulo ? null : c.pendente,
     pecas: c.pecas, atualizado_em: new Date().toISOString(),
+    origem_numero: c.origem ? c.origem.numero : null,
+    origem_saida: c.origem ? c.origem.data_saida : null,
   }));
+  console.log("Transferências abertas (peça segurada pro mês seguinte): " + abertos.filter((c) => c.origem).length);
   await emLotes(linhas, 500, (l) => gravar("POST", "/consignados?on_conflict=numero", l, "resolution=merge-duplicates,return=minimal"));
 
   // Aberto no espelho que a Terasoft já não devolve como aberto: atualiza a situação.
