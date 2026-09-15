@@ -120,10 +120,16 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
   const bruto = await terasoft(ddmmaaaa(new Date(hoje.getTime() - DIAS * 86400000)), ddmmaaaa(hoje));
   console.log("Linhas da Terasoft: " + bruto.length);
 
+  const outraEmpresa = new Set();
+
   // ---- 1. agrupa por consignado
   const cons = new Map();
   for (const x of bruto) {
-    if (!x.NOME_VENDEDOR || !x.NUMERO_CONSIGNADO || FORA.test(x.NOME_VENDEDOR)) continue;
+    if (!x.NOME_VENDEDOR || !x.NUMERO_CONSIGNADO) continue;
+    // Consignado de outra empresa: não entra, mas fica anotado. Se ele já estava
+    // no espelho no nome de uma afiliada (vendedora corrigida depois na
+    // Terasoft), sai do painel e da maleta dela logo abaixo.
+    if (FORA.test(x.NOME_VENDEDOR)) { outraEmpresa.add(x.NUMERO_CONSIGNADO); continue; }
     let c = cons.get(x.NUMERO_CONSIGNADO);
     if (!c) {
       c = {
@@ -145,6 +151,27 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
       c.itens.set(cod, it);
     }
   }
+  // REDE DE SEGURANÇA PELA MARCA DAS PEÇAS (15/09/2026). O 004676 saiu no
+  // nome da Isabela Sartori Parro com 50 peças da AURORA e o robô deixou
+  // passar, porque só olhava o nome da vendedora. Consignado de afiliada com
+  // metade ou mais das peças de Aurora, Mimece ou Altezza é tratado como de
+  // outra empresa. (Uma ou duas peças da Mimece numa maleta da Carina Melo é
+  // normal e continua.)
+  try {
+    const codsAbertos = [...new Set([...cons.values()].filter((c) => c.situacao === "ABERTO" && c.codigo_vendedor !== ESTOQUE_CICLICO)
+      .flatMap((c) => [...c.itens.keys()]))];
+    const marcaDe = new Map();
+    await emLotes(codsAbertos, 300, async (l) => {
+      (await ler("/produtos?codigo=in.(" + l.join(",") + ")&select=codigo,marca")).forEach((p) => marcaDe.set(Number(p.codigo), p.marca || ""));
+    });
+    for (const c of cons.values()) {
+      if (c.situacao !== "ABERTO" || c.codigo_vendedor === ESTOQUE_CICLICO) continue;
+      let fora = 0, total = 0;
+      c.itens.forEach((it, cod) => { total += it.quantidade; if (FORA.test(marcaDe.get(cod) || "")) fora += it.quantidade; });
+      if (total && fora / total >= 0.5) { outraEmpresa.add(c.numero); cons.delete(c.numero); }
+    }
+  } catch (e) { console.log("Aviso marca: " + String(e.message).slice(0, 80)); }
+
   const todos = [...cons.values()];
   const abertos = todos.filter((c) => c.situacao === "ABERTO");
   console.log("Consignados: " + todos.length + " | abertos: " + abertos.length
@@ -225,6 +252,28 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
     await emLotes(itens, 1000, (l) => gravar("POST", "/consignado_itens", l));
   }
   console.log("Espelho: " + linhas.length + " consignados | " + itens.length + " peças dos abertos");
+
+  // ---- 3b. o que virou outra empresa sai do painel e da maleta da afiliada
+  let limpos = 0;
+  if (outraEmpresa.size && !DRY) {
+    const noEspelho = await ler("/consignados?situacao=eq.ABERTO&afiliada_id=not.is.null&numero=in.("
+      + [...outraEmpresa].map((n) => '"' + n + '"').join(",") + ")&select=numero,afiliada_id");
+    for (const c of noEspelho) {
+      const cods = (await ler("/consignado_itens?numero=eq." + encodeURIComponent(c.numero) + "&select=codigo")).map((i) => Number(i.codigo));
+      const m = (await ler("/maletas?afiliada_id=eq." + c.afiliada_id + "&ativa=eq.true&select=id"))[0];
+      if (m && cods.length) {
+        const outros = abertos.filter((o) => (porCodigo.get(o.codigo_vendedor) || {}).id === c.afiliada_id && o.numero !== c.numero);
+        const ficam = new Set(outros.flatMap((o) => [...o.itens.keys()]));
+        const vendidas = new Set((await ler("/vendas?maleta_id=eq." + m.id + "&cancelada=eq.false&select=codigo")).map((v) => Number(v.codigo)));
+        const tirar = cods.filter((k) => !ficam.has(k) && !vendidas.has(k));
+        if (tirar.length) await gravar("DELETE", "/maleta_pecas?maleta_id=eq." + m.id + "&codigo=in.(" + tirar.join(",") + ")");
+      }
+      await gravar("DELETE", "/consignado_itens?numero=eq." + encodeURIComponent(c.numero));
+      await gravar("PATCH", "/consignados?numero=eq." + encodeURIComponent(c.numero), { situacao: "OUTRA_EMPRESA", afiliada_id: null });
+      limpos++;
+    }
+  }
+  console.log("Outra empresa: " + outraEmpresa.size + " consignados ignorados | tirados do painel agora: " + limpos);
 
   // ---- 4. maletas: toda afiliada com peça na mão
   const maletas = await ler("/maletas?ativa=eq.true&select=id,slug,afiliada_id,consignado,data_recebimento");
