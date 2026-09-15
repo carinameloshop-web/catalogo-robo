@@ -164,8 +164,9 @@ const R_VENDA = /\bvendi\b|\bvendeu\b|\bcomprou\b|\blevou\b|\bvendid[ao]\b|\bfia
     + " | pelo nome: " + ligadasNome + " | WhatsApp descoberto: " + zapNovo + " | sem grupo: " + semGrupo);
 
   // ---- 2. as mensagens de ontem e hoje
-  const jaTranscritos = new Set((await ler("/whatsapp_audios?quando=gte." + new Date(desdeMs - 86400000).toISOString() + "&select=id")
-    .catch(() => [])).map((x) => x.id));
+  // Transcrição já feita numa rodada anterior: reaproveita o texto (não paga de novo).
+  const jaTranscritos = new Map((await ler("/whatsapp_audios?quando=gte." + new Date(desdeMs - 86400000).toISOString() + "&select=id,texto")
+    .catch(() => [])).map((x) => [x.id, x.texto]));
   const resumos = [], audiosNovos = [];
   let lidas = 0, transcritos = 0, falhasAudio = 0;
 
@@ -213,13 +214,14 @@ const R_VENDA = /\bvendi\b|\bvendeu\b|\bcomprou\b|\blevou\b|\bvendid[ao]\b|\bfia
       if (/Audio/i.test(tipo)) {
         r.audios++;
         const id = x.messageid || x.id;
-        if (TRANSCREVER && id && !jaTranscritos.has(id)) {
+        if (id && jaTranscritos.has(id)) texto = jaTranscritos.get(id) || "";
+        else if (TRANSCREVER && id) {
           try {
             const d = await zap("/message/download", { id, transcribe: true });
             texto = String(d.transcription || "").trim();
             if (texto) { audiosNovos.push({ id, afiliada_id: a.id, quando: new Date(ms(x.messageTimestamp)).toISOString(), texto }); transcritos++; }
           } catch (e) { falhasAudio++; }
-          jaTranscritos.add(id);
+          jaTranscritos.set(id, texto);
         }
       }
       const perto = msgs.filter((y) => y._quem === "dela" && Math.abs(ms(y.messageTimestamp) - ms(x.messageTimestamp)) < 10 * 60000)
