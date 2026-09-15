@@ -111,7 +111,9 @@ const CIDADES = {
 const cidadeCerta = (c) => (c ? (CIDADES[c] || c) : null);
 
 const ESTOQUE_CICLICO = "000000";   // CARINA DIRETO
-// Aurora Muniz, Mimece e Altezza são outras empresas na mesma Terasoft.
+// Vendedoras de Aurora Muniz, Mimece e Altezza (outras empresas na mesma
+// Terasoft) não são afiliadas. As PEÇAS da Mimece são coleção da Carina Melo
+// desde 15/09/2026 e entram normalmente nas maletas.
 const FORA = /AURORA|MIMECE|ALTEZZA/i;
 
 (async () => {
@@ -154,9 +156,9 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
   // REDE DE SEGURANÇA PELA MARCA DAS PEÇAS (15/09/2026). O 004676 saiu no
   // nome da Isabela Sartori Parro com 50 peças da AURORA e o robô deixou
   // passar, porque só olhava o nome da vendedora. Consignado de afiliada com
-  // metade ou mais das peças de Aurora, Mimece ou Altezza é tratado como de
-  // outra empresa. (Uma ou duas peças da Mimece numa maleta da Carina Melo é
-  // normal e continua.)
+  // metade ou mais das peças de Aurora ou Altezza é tratado como de outra
+  // empresa. A Mimece NÃO entra nessa conta: desde 15/09/2026 é coleção da
+  // Carina Melo e pode encher uma maleta.
   try {
     const codsAbertos = [...new Set([...cons.values()].filter((c) => c.situacao === "ABERTO" && c.codigo_vendedor !== ESTOQUE_CICLICO)
       .flatMap((c) => [...c.itens.keys()]))];
@@ -167,7 +169,7 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
     for (const c of cons.values()) {
       if (c.situacao !== "ABERTO" || c.codigo_vendedor === ESTOQUE_CICLICO) continue;
       let fora = 0, total = 0;
-      c.itens.forEach((it, cod) => { total += it.quantidade; if (FORA.test(marcaDe.get(cod) || "")) fora += it.quantidade; });
+      c.itens.forEach((it, cod) => { total += it.quantidade; if (/AURORA|ALTEZZA/i.test(marcaDe.get(cod) || "")) fora += it.quantidade; });
       if (total && fora / total >= 0.5) { outraEmpresa.add(c.numero); cons.delete(c.numero); }
     }
   } catch (e) { console.log("Aviso marca: " + String(e.message).slice(0, 80)); }
@@ -206,25 +208,49 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
   // ---- 3. espelho dos consignados (só colunas do robô: merge não apaga o que a Iza preencheu)
   const guardar = todos.filter((c) => c.situacao === "ABERTO"
     || c.data_saida >= new Date(hoje.getTime() - 120 * 86400000).toISOString().slice(0, 10));
-  // TRANSFERÊNCIA: peça que a afiliada segura pro mês seguinte sai num
-  // consignado NOVO e pequeno, e a data de saída dele faz a peça parecer nova.
-  // Foi assim que a Amabile acumulou R$ 12 mil em 8 meses sem ninguém ver.
-  // Regra dura da Carina (14/09/2026): 60 dias do recebimento da PEÇA, e
-  // transferência nunca zera o relógio. Padrão: consignado aberto com até 8
-  // peças, todas presentes no último consignado CONCLUÍDO grande dela.
+  // TRANSFERÊNCIA, PEÇA POR PEÇA (refeito em 15/09/2026).
+  // Peça que a afiliada segura pro mês seguinte sai de novo num consignado com
+  // data nova, e a data faz a peça parecer nova. Foi assim que a Amabile
+  // acumulou R$ 12 mil em 8 meses. Regra dura da Carina: 60 dias do
+  // recebimento da PEÇA, e transferência nunca zera o relógio.
+  // A primeira versão só via transferência pequena (até 8 peças, todas da
+  // maleta anterior). A Iza mostrou que tem afiliada que transfere 20 a 30
+  // peças (Flaviana) e consignado que mistura transferidas e novas (Lucilene,
+  // 004624: 9 de 12 vieram da maleta de 23/07). Agora cada semijoia aberta é
+  // seguida pra trás: se ela estava num consignado anterior da MESMA afiliada,
+  // já baixado, até 60 dias antes, é a mesma peça continuando. A origem é o
+  // começo dessa corrente.
+  // A Terasoft só guarda uma data por consignado, por isso a Iza deve criar
+  // consignado separado a cada entrega (peça somada num consignado antigo
+  // herdaria a data antiga).
   const porVendedor = new Map();
   for (const c of todos) {
     if (!porVendedor.has(c.codigo_vendedor)) porVendedor.set(c.codigo_vendedor, []);
     porVendedor.get(c.codigo_vendedor).push(c);
   }
+  porVendedor.forEach((l) => l.sort((x, y) => y.data_saida.localeCompare(x.data_saida) || y.numero.localeCompare(x.numero)));
+  const dif = (a, b) => (new Date(a + "T12:00:00Z") - new Date(b + "T12:00:00Z")) / 86400000;
+  let pecasTransf = 0;
   for (const c of abertos) {
-    if (c.codigo_vendedor === ESTOQUE_CICLICO || c.itens.size > 8) continue;
-    const antes = porVendedor.get(c.codigo_vendedor)
-      .filter((p) => p.numero !== c.numero && p.data_saida < c.data_saida && p.situacao === "CONCLUIDO" && p.itens.size > 8)
-      .sort((x, y) => x.data_saida.localeCompare(y.data_saida));
-    const prev = antes[antes.length - 1];
-    if (prev && [...c.itens.keys()].every((k) => prev.itens.has(k))) c.origem = prev;
+    if (c.codigo_vendedor === ESTOQUE_CICLICO) continue;
+    const lista = porVendedor.get(c.codigo_vendedor);
+    const origens = new Set();
+    c.itens.forEach((it, cod) => {
+      let atual = c, origem = null;
+      for (let passo = 0; passo < 12; passo++) {
+        const prev = lista.find((p) => p.numero !== atual.numero && p.data_saida <= atual.data_saida
+          && p.numero < atual.numero && p.itens.has(cod)
+          && (p.situacao !== "ABERTO" || Number(p.itens.get(cod).pendente || 0) === 0));
+        if (!prev || dif(atual.data_saida, prev.data_saida) > 60) break;
+        origem = prev; atual = prev;
+      }
+      if (origem) { it.origem_numero = origem.numero; it.origem_saida = origem.data_saida; pecasTransf += it.quantidade; origens.add(origem.numero); }
+      else { it.origem_numero = null; it.origem_saida = null; }
+    });
+    // No consignado fica a origem só quando TODAS as peças vieram da mesma maleta.
+    if (origens.size === 1 && [...c.itens.values()].every((it) => it.origem_numero)) c.origem = todos.find((x) => x.numero === [...origens][0]);
   }
+  console.log("Semijoias abertas que vieram de maleta anterior: " + pecasTransf);
 
   const linhas = guardar.map((c) => ({
     numero: c.numero, codigo_vendedor: c.codigo_vendedor,
@@ -245,7 +271,8 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
   if (fecharam.length) console.log("Aberto no espelho e sumido da Terasoft (não mexi): " + fecharam.length);
 
   // Peças: só dos abertos. Reescreve as peças de cada aberto; as dos fechados saem.
-  const itens = abertos.flatMap((c) => [...c.itens.values()].map((it) => ({ numero: c.numero, ...it })));
+  const itens = abertos.flatMap((c) => [...c.itens.values()].map((it) => ({ numero: c.numero, ...it,
+    origem_numero: it.origem_numero || null, origem_saida: it.origem_saida || null })));
   if (!DRY) {
     await emLotes(guardar.map((c) => c.numero), 150, (l) =>
       gravar("DELETE", "/consignado_itens?numero=in.(" + l.map((n) => '"' + n + '"').join(",") + ")"));
