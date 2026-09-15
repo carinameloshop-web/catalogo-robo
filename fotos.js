@@ -19,6 +19,8 @@ const FOLDERS = [
   // Aurora (catalogo-aurora.vercel.app). São 136 arquivos / 130 códigos, todos
   // de marca AURORA, então nenhuma foto daqui cai no catálogo da Carina Melo.
   "1X1i-x19M-H6cEoWmwNAByaLMOtbiVCPQ",
+    // FOTOS ALTEZZA (15/09/2026) — fotos do site da Altezza
+  "1s7ACLfU51Jki93eYYrm-BTGQEf7kzTtZ",
 ];
 // Esta pasta é especial: a foto dentro dela É a aprovação do modelo de
 // personalizado. Só aparece pra afiliada o código que estiver aqui.
