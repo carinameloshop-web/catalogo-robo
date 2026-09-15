@@ -97,6 +97,19 @@ const titulo = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim()
   .replace(/(^|\s)(\S)/g, (m, e, c) => e + c.toUpperCase())
   .replace(/\s(De|Da|Do|Dos|Das|E)\s/g, (m) => m.toLowerCase());
 
+// A Terasoft grava cidade sem acento ("MARINGA", "MGA", "SP"). Na vitrine e na
+// arte da afiliada aparece "Afiliada em Maringá", então corrige aqui.
+// Lista feita com as cidades do cadastro em 15/09/2026; cidade nova sem acento
+// entra como veio e é só acrescentar.
+const CIDADES = {
+  "Angulo": "Ângulo", "Campo Mourao": "Campo Mourão", "Corbelia": "Corbélia", "Ivaipora": "Ivaiporã",
+  "Jaguapita": "Jaguapitã", "Kalore": "Kaloré", "Lidianopolis": "Lidianópolis", "Lilian Jd Alegre": "Jardim Alegre",
+  "Mandaguacu": "Mandaguaçu", "Maringa": "Maringá", "Mga": "Maringá", "Ribeirao Preto": "Ribeirão Preto",
+  "Sao Paulo": "São Paulo", "Sp": "São Paulo", "Paicandu": "Paiçandu", "Iguaracu": "Iguaraçu",
+  "Engenheiro Beltrao": "Engenheiro Beltrão", "Jd Alegre": "Jardim Alegre",
+};
+const cidadeCerta = (c) => (c ? (CIDADES[c] || c) : null);
+
 const ESTOQUE_CICLICO = "000000";   // CARINA DIRETO
 // Aurora Muniz, Mimece e Altezza são outras empresas na mesma Terasoft.
 const FORA = /AURORA|MIMECE|ALTEZZA/i;
@@ -153,7 +166,7 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
     while (slugs.has(slug)) slug = partes.slice(0, ++i).join("-") || slug + "-" + i;
     slugs.add(slug);
     novas.set(c.codigo_vendedor, {
-      slug, nome: titulo(nome), cidade: titulo(resto.join(" - ")) || null,
+      slug, nome: titulo(nome), cidade: cidadeCerta(titulo(resto.join(" - "))),
       pin: String(crypto.randomInt(1000, 10000)), codigo_terasoft: c.codigo_vendedor, tipo: "afiliada", ativa: true,
     });
   }
