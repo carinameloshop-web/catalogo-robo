@@ -1,0 +1,33 @@
+name: WhatsApp das afiliadas
+
+# Toda madrugada lê o grupo "Pedidos ..." de cada afiliada: quando ela falou,
+# comprovante, pedido de peça, venda contada, áudio transcrito. Ver whatsapp.js.
+#
+# 05h de Brasília, depois do robô dos consignados (04h30). Precisa rodar TODO
+# dia: o WhatsApp apaga a mídia do áudio em 2 dias, e áudio não transcrito a
+# tempo se perde.
+#
+# Só lê. Nunca envia mensagem.
+# REPOSITÓRIO PÚBLICO: o log é visível. O robô só imprime contagens.
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+jobs:
+  whatsapp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Baixar os arquivos
+        uses: actions/checkout@v7
+      - name: Preparar Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Ler os grupos
+        run: node whatsapp.js
+        env:
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          UAZAPI_TOKEN: ${{ secrets.UAZAPI_TOKEN }}
