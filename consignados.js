@@ -98,7 +98,8 @@ const titulo = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim()
   .replace(/\s(De|Da|Do|Dos|Das|E)\s/g, (m) => m.toLowerCase());
 
 const ESTOQUE_CICLICO = "000000";   // CARINA DIRETO
-const FORA = /AURORA/i;
+// Aurora Muniz, Mimece e Altezza são outras empresas na mesma Terasoft.
+const FORA = /AURORA|MIMECE|ALTEZZA/i;
 
 (async () => {
   const t0 = Date.now();
