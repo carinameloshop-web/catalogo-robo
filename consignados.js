@@ -63,8 +63,8 @@ async function emLotes(lista, tam, fn) {
 }
 
 // Certificado próprio da Terasoft: precisa do https com rejectUnauthorized:false.
-function terasoft(ini, fim) {
-  const caminho = "/consulta?ep=consignado&data_inicial=" + encodeURIComponent(ini)
+function terasoft(ini, fim, ep) {
+  const caminho = "/consulta?ep=" + (ep || "consignado") + "&data_inicial=" + encodeURIComponent(ini)
     + "&data_final=" + encodeURIComponent(fim);
   return new Promise((ok, falha) => {
     const req = https.request({
@@ -281,6 +281,37 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
     }
   }
   console.log("Maletas: " + abertas + " abertas agora | " + atualizadas + " atualizadas | " + pecasNovas + " peças entraram");
+
+  // ---- 5. vendas (acertos) por afiliada por mês, pro "game" da Minha Maleta
+  // Pedido da Carina em 15/09/2026: a afiliada vê quanto já ganhou desde que
+  // entrou e sobe de nível pelas vendas PAGAS (7 semijoias no ciclo dobra a
+  // chance de ela ficar). Na Terasoft, acerto = venda registrada (ep=venda).
+  // Ganho = soma dos itens (preço de tabela) x comissão dela; o valor do pedido
+  // pode vir com desconto e, pra Marta Gomes e Elisângela, já é o valor delas.
+  // Consulta separada da de consignado (limite de 12 por hora é por consulta).
+  try {
+    const vendas = await terasoft(ddmmaaaa(new Date(hoje.getTime() - 1100 * 86400000)), ddmmaaaa(hoje), "venda");
+    const mes = new Map();
+    for (const v of vendas) {
+      if (!v.NOME_VENDEDOR || FORA.test(v.NOME_VENDEDOR) || v.CODIGO_VENDEDOR === ESTOQUE_CICLICO) continue;
+      if (v.SITUACAO && !/REALIZADO/i.test(v.SITUACAO)) continue;
+      const k = v.CODIGO_VENDEDOR + "|" + String(v.DATA_VENDA).slice(0, 7);
+      const o = mes.get(k) || { codigo_vendedor: v.CODIGO_VENDEDOR, mes: String(v.DATA_VENDA).slice(0, 7), pecas: 0, valor_itens: 0, docs: new Map() };
+      o.pecas += v.QUANTIDADE || 0;
+      o.valor_itens += Number(v.VALOR_TOTAL_ITEM || 0);
+      o.docs.set(v.NUMERO_DOCUMENTO, Number(v.VALOR_TOTAL_PEDIDO || 0));
+      mes.set(k, o);
+    }
+    const linhasMes = [...mes.values()].map((o) => ({
+      codigo_vendedor: o.codigo_vendedor, mes: o.mes, pecas: o.pecas,
+      valor_itens: Math.round(o.valor_itens * 100) / 100,
+      valor_pedidos: Math.round([...o.docs.values()].reduce((a, b) => a + b, 0) * 100) / 100,
+    }));
+    await emLotes(linhasMes, 500, (l) => gravar("POST", "/vendas_terasoft_mes?on_conflict=codigo_vendedor,mes", l, "resolution=merge-duplicates,return=minimal"));
+    console.log("Vendas da Terasoft: " + vendas.length + " linhas | " + linhasMes.length + " meses de afiliada");
+  } catch (e) {
+    console.log("Aviso vendas: " + String(e.message).slice(0, 120));
+  }
 
   if (!DRY) {
     try {
