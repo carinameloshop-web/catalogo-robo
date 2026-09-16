@@ -350,7 +350,11 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
       await gravar("PATCH", "/maletas?id=eq." + m.id, dados);
       atualizadas++;
     }
-    const cods = new Set(dela.flatMap((c) => [...c.itens.keys()]));
+    // Só o que ainda está pendente. Peça já acertada ou devolvida dentro de um
+    // consignado que segue aberto não está mais com ela (Jessica, Cibelli,
+    // Emanuelli e Marta tinham dezenas assim na vitrine, 16/09/2026).
+    const cods = new Set(dela.flatMap((c) => [...c.itens.entries()]
+      .filter(([, it]) => it.pendente === null || Number(it.pendente) > 0).map(([k]) => k)));
     const jaTem = m.id ? new Set((await ler("/maleta_pecas?maleta_id=eq." + m.id + "&select=codigo")).map((p) => Number(p.codigo))) : new Set();
     const conferida = jaTem.size > 0;
     const entrar = [...cods].filter((k) => !jaTem.has(k));
