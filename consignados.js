@@ -206,7 +206,12 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
   console.log("Cadastro: " + porCodigo.size + " ligadas à Terasoft | novas agora: " + novas.size);
 
   // ---- 3. espelho dos consignados (só colunas do robô: merge não apaga o que a Iza preencheu)
-  const guardar = todos.filter((c) => c.situacao === "ABERTO"
+  // O espelho guarda os abertos e os últimos 120 dias. MAS o que o espelho ainda
+  // tem como aberto entra sempre, mesmo antigo: senão, quando a Iza finaliza um
+  // consignado velho (003696 da Adrielly, de 25/03, finalizado em 15/09), a
+  // conclusão nunca chega e ele fica "aberto" no painel pra sempre.
+  const abertosNoEspelho = new Set((await ler("/consignados?situacao=eq.ABERTO&select=numero")).map((x) => x.numero));
+  const guardar = todos.filter((c) => c.situacao === "ABERTO" || abertosNoEspelho.has(c.numero)
     || c.data_saida >= new Date(hoje.getTime() - 120 * 86400000).toISOString().slice(0, 10));
   // TRANSFERÊNCIA, PEÇA POR PEÇA (refeito em 15/09/2026).
   // Peça que a afiliada segura pro mês seguinte sai de novo num consignado com
