@@ -1,0 +1,49 @@
+name: Copia de seguranca da Minha Maleta
+
+# Toda madrugada copia banco + comprovantes + fotos, trancado com senha, pro
+# repositorio PRIVADO carinameloshop-web/maleta-backup. Ver backup.js.
+#
+# 03h de Brasilia (antes do robo dos consignados mexer em tudo).
+# Se falhar, a rodada fica vermelha e o GitHub manda e-mail.
+#
+# REPOSITORIO PUBLICO: o log so mostra contagens.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Baixar os arquivos
+        uses: actions/checkout@v7
+      - name: Baixar a copia anterior
+        uses: actions/checkout@v7
+        with:
+          repository: carinameloshop-web/maleta-backup
+          ssh-key: ${{ secrets.BACKUP_DEPLOY_KEY }}
+          path: copia
+      - name: Preparar Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Copiar
+        run: node backup.js
+        env:
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          BACKUP_SENHA: ${{ secrets.BACKUP_SENHA }}
+          DESTINO: copia
+      - name: Guardar (um commit so, o vencido some de verdade)
+        if: always()
+        working-directory: copia
+        run: |
+          test -f README.md || exit 1
+          git config user.name "robo-backup"
+          git config user.email "robo-backup@users.noreply.github.com"
+          git checkout --orphan nova
+          git add -A
+          git commit -q -m "copia $(date -u +%F)"
+          git push -q -f origin nova:main
