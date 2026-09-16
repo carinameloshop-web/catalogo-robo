@@ -322,7 +322,10 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
     porAfiliada.get(a.id).cons.push(c);
   }
 
-  let abertas = 0, pecasNovas = 0, atualizadas = 0;
+  let abertas = 0, pecasNovas = 0, atualizadas = 0, pecasSairam = 0;
+  // Só tira peça ou fecha maleta se a Terasoft respondeu inteira (em 16/09 eram
+  // ~115 abertos de afiliadas). Resposta capenga nunca esvazia maleta.
+  const confiavel = porCodigo.size > 0 && abertos.filter((c) => c.codigo_vendedor !== ESTOQUE_CICLICO).length >= 60;
   for (const { a, cons: dela } of porAfiliada.values()) {
     dela.sort((x, y) => y.data_saida.localeCompare(x.data_saida));
     const ultimo = dela[0];
@@ -360,8 +363,32 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
         recebida: conferida ? true : null, conferida_em: conferida ? new Date().toISOString() : null,
       }))));
     }
+    // Semijoia que saiu de todos os consignados abertos dela (devolvida ou
+    // acertada na Terasoft) sai da maleta e da vitrine. A que ela registrou como
+    // vendida no app fica, é o histórico dela. (16/09/2026: antes nada saía.)
+    const sair = [...jaTem].filter((k) => !cods.has(k));
+    if (sair.length && m.id && confiavel) {
+      const vendidas = new Set((await ler("/vendas?maleta_id=eq." + m.id + "&cancelada=eq.false&select=codigo")).map((v) => Number(v.codigo)));
+      const tirar = sair.filter((k) => !vendidas.has(k));
+      if (tirar.length) await emLotes(tirar, 300, (l) => gravar("DELETE", "/maleta_pecas?maleta_id=eq." + m.id + "&codigo=in.(" + l.join(",") + ")"));
+      pecasSairam += tirar.length;
+    }
   }
-  console.log("Maletas: " + abertas + " abertas agora | " + atualizadas + " atualizadas | " + pecasNovas + " peças entraram");
+
+  // Afiliada sem nenhum consignado aberto não tem semijoia na mão: a maleta
+  // fecha e a vitrine sai do ar. O link dela continua abrindo (personalizados).
+  // Caso Adrielly, 16/09/2026: já não era afiliada e a vitrine ainda mostrava peça.
+  let fechadas = 0;
+  if (confiavel) {
+    for (const m of maletas) {
+      if (!m.afiliada_id || porAfiliada.has(m.afiliada_id)) continue;
+      if ((afs.find((x) => x.id === m.afiliada_id) || {}).tipo === "interna") continue;
+      await gravar("PATCH", "/maletas?id=eq." + m.id, { ativa: false });
+      fechadas++;
+    }
+  }
+  console.log("Maletas: " + abertas + " abertas agora | " + atualizadas + " atualizadas | " + pecasNovas + " peças entraram | "
+    + pecasSairam + " peças saíram | " + fechadas + " fechadas (sem consignado aberto)");
 
   // ---- 5. vendas (acertos) por afiliada por mês, pro "game" da Minha Maleta
   // Pedido da Carina em 15/09/2026: a afiliada vê quanto já ganhou desde que
