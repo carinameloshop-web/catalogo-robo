@@ -314,6 +314,13 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
   const recebimentos = await ler("/consignados?situacao=eq.ABERTO&data_recebimento=not.is.null&select=numero,data_recebimento");
   const recebidoEm = new Map(recebimentos.map((r) => [r.numero, r.data_recebimento]));
 
+  // Consignado que a Iza marcou como "no escritório": as semijoias não estão
+  // com a afiliada, então não entram na maleta nem na vitrine (17/09/2026).
+  let noEscritorio = new Set();
+  try {
+    noEscritorio = new Set((await ler("/consignados?situacao=eq.ABERTO&situacao_maleta=eq.no_escritorio&select=numero")).map((x) => x.numero));
+  } catch (e) { /* sem a coluna ainda */ }
+
   const porAfiliada = new Map();
   for (const c of abertos) {
     const a = porCodigo.get(c.codigo_vendedor);
@@ -353,7 +360,7 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
     // Só o que ainda está pendente. Peça já acertada ou devolvida dentro de um
     // consignado que segue aberto não está mais com ela (Jessica, Cibelli,
     // Emanuelli e Marta tinham dezenas assim na vitrine, 16/09/2026).
-    const cods = new Set(dela.flatMap((c) => [...c.itens.entries()]
+    const cods = new Set(dela.filter((c) => !noEscritorio.has(c.numero)).flatMap((c) => [...c.itens.entries()]
       .filter(([, it]) => it.pendente === null || Number(it.pendente) > 0).map(([k]) => k)));
     const jaTem = m.id ? new Set((await ler("/maleta_pecas?maleta_id=eq." + m.id + "&select=codigo")).map((p) => Number(p.codigo))) : new Set();
     const conferida = jaTem.size > 0;
