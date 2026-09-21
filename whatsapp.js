@@ -169,9 +169,10 @@ const R_VENDA = /\bvendi\b|\bvendeu\b|\bcomprou\b|\blevou\b|\bvendid[ao]\b|\bfia
 
   // ---- 1b. quem indicou quem (Pix da Gratidão, 21/09/2026)
   // Regra da Carina: afiliada que está no grupo de pedidos de OUTRA afiliada foi
-  // quem a indicou (ex.: Maisa no grupo da Carolina Tampelini). Ex-equipe não
-  // conta: a Andressa Caroline está em ~18 grupos do tempo em que atendia.
-  const NAO_INDICA = new Set(["554499981150"].map(tel));
+  // quem a indicou (ex.: Maisa no grupo da Carolina Tampelini). A Andressa
+  // Caroline (celular pessoal 554499981150) CONTA: a Carina confirmou em
+  // 21/09/2026 que ela indicou as afiliadas em cujos grupos está.
+  const NAO_INDICA = new Set([]);
   const porTel = new Map(afs.filter((a) => tel(a.whatsapp)).map((a) => [tel(a.whatsapp), a]));
   const pares = new Map();
   for (const b of afs) {
