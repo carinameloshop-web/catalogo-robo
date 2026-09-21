@@ -167,6 +167,28 @@ const R_VENDA = /\bvendi\b|\bvendeu\b|\bcomprou\b|\blevou\b|\bvendid[ao]\b|\bfia
   console.log("Grupos de pedido: " + grupos.length + " | ligadas pelo telefone: " + ligadasTel
     + " | pelo nome: " + ligadasNome + " | WhatsApp descoberto: " + zapNovo + " | sem grupo: " + semGrupo);
 
+  // ---- 1b. quem indicou quem (Pix da Gratidão, 21/09/2026)
+  // Regra da Carina: afiliada que está no grupo de pedidos de OUTRA afiliada foi
+  // quem a indicou (ex.: Maisa no grupo da Carolina Tampelini). Ex-equipe não
+  // conta: a Andressa Caroline está em ~18 grupos do tempo em que atendia.
+  const NAO_INDICA = new Set(["554499981150"].map(tel));
+  const porTel = new Map(afs.filter((a) => tel(a.whatsapp)).map((a) => [tel(a.whatsapp), a]));
+  const pares = new Map();
+  for (const b of afs) {
+    if (!b._grupo) continue;
+    for (const p of info.get(b._grupo).participantes) {
+      const a = p.tel && porTel.get(p.tel);
+      if (!a || a.id === b.id || EQUIPE_T.has(p.tel) || NAO_INDICA.has(p.tel)) continue;
+      pares.set(b.id + ":" + a.id, { indicada_id: b.id, indicadora_id: a.id, fonte: "grupo_whatsapp", visto_em: new Date().toISOString() });
+    }
+  }
+  try {
+    if (pares.size) await gravar("POST", "/indicacoes?on_conflict=indicada_id,indicadora_id", [...pares.values()],
+      "resolution=merge-duplicates,return=minimal");
+    const indicadoras = new Set([...pares.values()].map((x) => x.indicadora_id)).size;
+    console.log("Indicações vistas nos grupos: " + pares.size + " | indicadoras: " + indicadoras);
+  } catch (e) { console.log("Indicações: tabela ainda não existe (rodar 27-indicacoes.sql)"); }
+
   // ---- 2. as mensagens de ontem e hoje
   // Transcrição já feita numa rodada anterior: reaproveita o texto (não paga de novo).
   const jaTranscritos = new Map((await ler("/whatsapp_audios?quando=gte." + new Date(desdeMs - 86400000).toISOString() + "&select=id,texto")
