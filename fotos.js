@@ -21,7 +21,21 @@ const FOLDERS = [
   "1X1i-x19M-H6cEoWmwNAByaLMOtbiVCPQ",
     // FOTOS ALTEZZA (15/09/2026) — fotos do site da Altezza
   "1s7ACLfU51Jki93eYYrm-BTGQEf7kzTtZ",
+  // FOTOS DA CÁSSIA (22/09/2026) — ela está fotografando as semijoias.
+  // Entram no catálogo como as outras e cada arquivo é registrado na tabela
+  // fotos_cassia, porque a Carina paga R$ 1,00 por foto.
+  "1yvAaTP0TB25pj4ZJ413tPUV0TBDSvZKM",
 ];
+// QUEM FOTOGRAFOU (22/09/2026): a Carina paga R$ 1,00 por foto. Cada arquivo
+// destas pastas é registrado uma vez na tabela fotos_fotografo, e a Central
+// mostra quantas fotos e quanto falta pagar. Aurora e Altezza ficam de fora:
+// são outras empresas.
+const FOTOGRAFO = {
+  "11ibI_41F9-S6d4gjVIN_bXGsOtLou7AV": "Bia",
+  "1mOffDv1VkstcmSm1VAMbntevLKQ6lFnL": "Bia",
+  "1DIHkbdJG8ouPWrBHimCxPhNddDvXrjBm": "Bia",
+  "1yvAaTP0TB25pj4ZJ413tPUV0TBDSvZKM": "Cássia",
+};
 // Esta pasta é especial: a foto dentro dela É a aprovação do modelo de
 // personalizado. Só aparece pra afiliada o código que estiver aqui.
 const PASTA_PERSONALIZADOS = "1DIHkbdJG8ouPWrBHimCxPhNddDvXrjBm";
@@ -69,8 +83,11 @@ async function sbSet(codigo, foto) {
   const modelo = new Map();    // codigo -> fileId (foto na modelo)
   const dono = new Map();      // fileId -> códigos que o NOME do arquivo reivindica
   const modelos = new Set();   // códigos que estão na pasta dos personalizados
+  const paraPagar = [];        // quem fotografou o quê (R$ 1,00 por foto)
   for (const f of FOLDERS) {
     const files = await listFolder(f); // já vem do mais recente p/ o mais antigo
+    console.log("  pasta " + f + ": " + files.length + " fotos" + (FOTOGRAFO[f] ? " (" + FOTOGRAFO[f] + ")" : ""));
+    if (FOTOGRAFO[f]) paraPagar.push(...files.map((x) => ({ ...x, pasta: f, quem: FOTOGRAFO[f] })));
     for (const file of files) {
       const base = file.name.replace(/\.[a-z0-9]+$/i, "").trim();
       if (/^\d+(-\d+)*$/.test(base)) {            // "5010" ou "5010-5011" -> foto principal
@@ -218,6 +235,28 @@ async function sbSet(codigo, foto) {
               "| religados:", mLigados, "| desligados:", mDesligados,
               "| RECUSADOS por código descontinuado:", mRecusados,
               "| avisos resolvidos:", mLimpos);
+
+  // ---- QUEM FOTOGRAFOU (22/09/2026): registra cada arquivo uma vez só, pra a
+  // Carina pagar R$ 1,00 por foto. Quem marca como pago é a Central.
+  if (!DRY && paraPagar.length) {
+    try {
+      const linhas = paraPagar.map((f) => ({ file_id: f.id, nome: f.name, quem: f.quem, pasta: f.pasta,
+        codigo: (String(f.name).match(/\d+/) || [null])[0], subida_em: f.modifiedTime }));
+      let ok = true;
+      for (let i = 0; i < linhas.length; i += 500) {
+        const r = await fetch("https://dqljtdznecqzninwvtsj.supabase.co/rest/v1/fotos_fotografo?on_conflict=file_id", {
+          method: "POST",
+          headers: { apikey: SVC, Authorization: "Bearer " + SVC, "Content-Type": "application/json",
+                     Prefer: "resolution=ignore-duplicates,return=minimal" },
+          body: JSON.stringify(linhas.slice(i, i + 500)),
+        });
+        if (!r.ok) { ok = false; console.error("  fotos pra pagar: " + r.status + " " + (await r.text()).slice(0, 120)); break; }
+      }
+      const porQuem = {};
+      paraPagar.forEach((f) => { porQuem[f.quem] = (porQuem[f.quem] || 0) + 1; });
+      console.log("Fotos pra pagar:", JSON.stringify(porQuem), ok ? "(registradas)" : "(não registrou)");
+    } catch (e) { console.error("  fotos pra pagar: falhou,", e.message); }
+  }
 
   // Deixa registrado que rodou. Robo que para nao avisa: e o painel que
   // avisa por ele, mostrando ha quantas horas foi a ultima passada.
