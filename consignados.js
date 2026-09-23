@@ -111,6 +111,11 @@ const CIDADES = {
 const cidadeCerta = (c) => (c ? (CIDADES[c] || c) : null);
 
 const ESTOQUE_CICLICO = "000000";   // CARINA DIRETO
+// A MALETA DE EXEMPLO DA CARINA (22/09/2026): consignado feito no código do
+// estoque (000000), em nome dela, que ela quer ver na Minha Maleta (/carina).
+// Pra trocar de maleta, é só mudar o número aqui.
+const MALETA_DA_CARINA = new Set(["004777"]);
+const SLUG_CARINA = "carina";
 // Vendedoras de Aurora Muniz, Mimece e Altezza (outras empresas na mesma
 // Terasoft) não são afiliadas. As PEÇAS da Mimece são coleção da Carina Melo
 // desde 15/09/2026 e entram normalmente nas maletas.
@@ -259,7 +264,7 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
 
   const linhas = guardar.map((c) => ({
     numero: c.numero, codigo_vendedor: c.codigo_vendedor,
-    afiliada_id: (porCodigo.get(c.codigo_vendedor) || {}).id || null,
+    afiliada_id: (MALETA_DA_CARINA.has(c.numero) ? (afs.find((x) => x.slug === SLUG_CARINA) || {}) : (porCodigo.get(c.codigo_vendedor) || {})).id || null,
     data_saida: c.data_saida, situacao: c.situacao,
     valor_total: c.valor_total, valor_pendente: c.pendenteNulo ? null : c.pendente,
     pecas: c.pecas, atualizado_em: new Date().toISOString(),
@@ -323,8 +328,10 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
 
   const porAfiliada = new Map();
   for (const c of abertos) {
-    const a = porCodigo.get(c.codigo_vendedor);
-    if (!a || a.tipo === "interna") continue;
+    // A maleta de exemplo da Carina entra mesmo sendo do código do estoque.
+    const daCarina = MALETA_DA_CARINA.has(c.numero);
+    const a = daCarina ? afs.find((x) => x.slug === SLUG_CARINA) : porCodigo.get(c.codigo_vendedor);
+    if (!a || (a.tipo === "interna" && !daCarina)) continue;
     if (!porAfiliada.has(a.id)) porAfiliada.set(a.id, { a, cons: [] });
     porAfiliada.get(a.id).cons.push(c);
   }
