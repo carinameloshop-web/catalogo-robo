@@ -331,7 +331,9 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
     // A maleta de exemplo da Carina entra mesmo sendo do código do estoque.
     const daCarina = MALETA_DA_CARINA.has(c.numero);
     const a = daCarina ? afs.find((x) => x.slug === SLUG_CARINA) : porCodigo.get(c.codigo_vendedor);
-    if (!a || (a.tipo === "interna" && !daCarina)) continue;
+    // A Carina é "interna" no cadastro (fica fora das contas de afiliada), mas a
+    // maleta dela entra: desde 22/09/2026 ela tem código de vendedora (000550).
+    if (!a || (a.tipo === "interna" && !daCarina && a.slug !== SLUG_CARINA)) continue;
     if (!porAfiliada.has(a.id)) porAfiliada.set(a.id, { a, cons: [] });
     porAfiliada.get(a.id).cons.push(c);
   }
