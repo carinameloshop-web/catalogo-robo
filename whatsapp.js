@@ -17,6 +17,10 @@
 //     duas vezes não duplica).
 //  3. Áudio DELA é transcrito uma vez só e guardado em whatsapp_audios (o
 //     WhatsApp apaga a mídia em 2 dias; a transcrição custa, então não repete).
+//  4. ONBOARDING (25/09/2026): lê o grupo das novatas e marca sozinho os passos
+//     da aba Onboarding da Central (pagou, contrato, maleta postada, maleta
+//     chegou, Rede, módulos, comunidade, 1ª venda). SÓ sobe passo pra "sim":
+//     nunca desmarca o que a Carina marcou na mão.
 //
 // Só LÊ. Nunca envia mensagem: o número principal carrega a operação inteira.
 //
@@ -97,6 +101,37 @@ const R_COMPROVANTE = /comprovante|\bpix\b|transfer[eêi]|paguei|pagamento|dep[o
 // "falta", "pedido" e "acabou": marcavam "passo lá sem falta" e "é do pedido".
 const R_PEDIDO = /\btem (ess[ae]s?|aquel[ae]s?|mais|dispon|no (estoque|escrit)|de volta)|voc[eê]s? t[eê]m|\bainda tem\b|\bpreciso d[aeo]s? (pe[cç]|brinc|colar|anel|an[eé]is|pulseir|escapul|berlo|argol)|\bmanda(r)? (mais|outr)|\brepor\b|reposi[cç][aã]o|consegue(m)? (me )?(mandar|enviar|separar)|\bseparar? pra mim\b/i;
 const R_VENDA = /\bvendi\b|\bvendeu\b|\bcomprou\b|\blevou\b|\bvendid[ao]\b|\bfiado\b|cliente (quer|pagou|comprou|levou|gostou)/i;
+
+// ---------------------------------------------------- ONBOARDING (25/09/2026)
+// O que o escritório escreve no grupo (ou a novata responde) conta a etapa em
+// que ela está. As frases vêm das mensagens reais, testadas em
+// automacoes/novatas-auto.js. "esc" = mensagem do escritório, "dela" = dela.
+const REGRAS_ONB = [
+  ["grupo", "qualquer", /./],
+  ["boas_vindas", "esc", /seja muito bem[- ]?vinda/],
+  ["pagou", "esc", /primeiras aulas ja estao liberadas/],
+  ["pagou", "dela", /\bpaguei\b|fiz o pagamento|ja paguei/],
+  ["dia1", "esc", /dia 1 -|dia 1:|primeira aula|primeiras aulas ja estao liberadas/],
+  ["dez_nomes", "esc", /dia 2 - como funciona|providenciando (o )?seu contrato|10 nomes/],
+  ["dia2", "esc", /dia 2 - como funciona|dia 2 -|dia 2:/],
+  ["contrato_enviado", "esc", /contrato.*(segue|enviei|mandei|mandando|assinar|assinatura|link|anexo)|(segue|enviei|mandei|assina).*contrato/],
+  ["contrato_assinado", "dela", /\bassinei\b|contrato.*assinad|assinad.*contrato/],
+  ["maleta_postada", "esc", /rastreio|sai daqui pelo correio|enviando amanha sua maleta|nota (d )?fiscal de recebimento|nota de recebimento|colocamos hoje mesmo no correio|sua maleta ja esta a caminho/],
+  ["maleta_chegou", "esc", /sua maleta chegou/],
+  ["maleta_chegou", "dela", /maleta chegou|chegou a maleta|recebi a maleta|recebi minha maleta/],
+  ["rede_enviado", "esc", /login da rede|cadastro na rede|acesso (da|na) rede|seu login e|dados de acesso da rede/],
+  ["rede_ok", "esc", /cadastro na rede deu certo|tudo que voce precisa saber para vender muito/],
+  ["modulos", "esc", /tudo que voce precisa saber para vender muito|modulos pos[- ]?maleta|modulo pos[- ]?maleta/],
+  ["comunidade", "qualquer", /chat\.whatsapp\.com\/e8sj2ush06tgskft4mi0wr/],
+  ["primeira_venda", "esc", /fez a primeira venda|primeira venda da/],
+];
+// Passo que só acontece depois de outro: se a maleta chegou, ela foi postada e
+// o contrato já tinha sido assinado.
+// Aqui o texto NÃO passa pelo limpar(): a pontuação importa (link da comunidade,
+// "dia 1 -"). Só tira acento e põe em minúscula.
+const semAcentoOnb = (x) => String(x || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const ANTES_ONB = { maleta_chegou: ["maleta_postada", "contrato_assinado", "contrato_enviado"],
+                    maleta_postada: ["contrato_enviado"], rede_ok: ["rede_enviado"] };
 
 (async () => {
   const t0 = Date.now();
@@ -283,6 +318,68 @@ const R_VENDA = /\bvendi\b|\bvendeu\b|\bcomprou\b|\blevou\b|\bvendid[ao]\b|\bfia
   console.log("Marcas: comprovantes " + soma("comprovantes") + " | pedidos de peça " + soma("pedidos_peca") + " | vendas citadas " + soma("vendas_citadas"));
   const semGrupoComMaleta = afs.filter((a) => !a._grupo && comMaleta.has(a.id)).length;
   console.log("Com maleta e sem grupo encontrado: " + semGrupoComMaleta);
+
+  // ---- 4. onboarding: marca sozinho o que já aconteceu no grupo
+  try {
+    const fila = (await ler("/onboarding?situacao=neq.Reprovada&select=id,nome,cidade,whatsapp,afiliada_id,situacao,grupo_whatsapp,passos,datas"))
+      .filter((o) => REGRAS_ONB.some(([k]) => (o.passos || {})[k] !== "sim"));
+    const grupoDaAfiliada = new Map(afs.filter((a) => a._grupo).map((a) => [a.id, a._grupo]));
+    let marcados = 0, achou = 0;
+    for (const o of fila) {
+      // 1) o grupo que já está gravado  2) o da afiliada ligada  3) pelo telefone
+      // 4) pelo nome no título do grupo, e só se for um grupo só
+      let jid = (o.grupo_whatsapp && info.get(o.grupo_whatsapp)) ? o.grupo_whatsapp : null;
+      if (!jid && o.afiliada_id) jid = grupoDaAfiliada.get(o.afiliada_id) || null;
+      if (!jid) {
+        const t = tel(o.whatsapp);
+        const porTelefone = t ? [...info.entries()].filter(([, g]) => g.participantes.some((p) => p.tel === t)) : [];
+        if (porTelefone.length === 1) jid = porTelefone[0][0];
+      }
+      if (!jid) {
+        const nomes = limpar(o.nome).split(" ").filter((w) => w.length > 2 && !["DOS", "DAS"].includes(w));
+        const cid = limpar(o.cidade);
+        const porNome = [...info.entries()].filter(([, g]) => {
+          const gn = limpar(g.nome).split(" ");
+          return nomes.length && gn.includes(nomes[0])
+            && (nomes.slice(1).some((w) => gn.includes(w)) || (cid && limpar(g.nome).includes(cid)));
+        });
+        if (porNome.length === 1) jid = porNome[0][0];
+      }
+      if (!jid) continue;
+      achou++;
+      const g = info.get(jid);
+      const t = tel(o.whatsapp);
+      const lidsDela = new Set(g.participantes.filter((p) => t && p.tel === t).map((p) => p.lid));
+      const lidsEquipe = new Set(g.participantes.filter((p) => EQUIPE_T.has(p.tel)).map((p) => p.lid));
+      const m = await zap("/message/find", { chatid: jid, limit: 500 });
+      const msgs = (m.messages || []).sort((x, y) => ms(x.messageTimestamp) - ms(y.messageTimestamp));
+      const passos = { ...(o.passos || {}) }, datas = { ...(o.datas || {}) };
+      const novos = [];
+      const por = (k, quando) => {
+        if (passos[k] === "sim") return;
+        passos[k] = "sim"; datas[k] = datas[k] || quando; novos.push(k);
+        (ANTES_ONB[k] || []).forEach((a) => { if (passos[a] !== "sim") { passos[a] = "sim"; datas[a] = datas[a] || quando; novos.push(a); } });
+      };
+      for (const x of msgs) {
+        const quem = x.fromMe || lidsEquipe.has(lid(x.sender)) ? "esc"
+          : lidsDela.has(lid(x.sender)) ? "dela" : "outro";
+        const texto = semAcentoOnb(String(x.text || (x.content && x.content.caption) || ""));
+        if (!texto) continue;
+        const quando = diaBR(x.messageTimestamp);
+        for (const [k, de, re] of REGRAS_ONB) {
+          if (de !== "qualquer" && de !== quem) continue;
+          if (k === "grupo") { por("grupo", quando); continue; }
+          if (re.test(texto)) por(k, quando);
+        }
+      }
+      if (!novos.length) { if (o.grupo_whatsapp !== jid) await gravar("PATCH", "/onboarding?id=eq." + o.id, { grupo_whatsapp: jid }); continue; }
+      marcados += novos.length;
+      await gravar("PATCH", "/onboarding?id=eq." + o.id,
+        { passos, datas, grupo_whatsapp: jid, ultimo_sinal: diaBR(Date.now()), atualizado_em: new Date().toISOString() });
+      if (DEBUG) console.log("  onboarding " + o.nome + ": " + novos.join(", "));
+    }
+    console.log("Onboarding: " + fila.length + " em aberto, grupo achado em " + achou + ", passos marcados " + marcados);
+  } catch (e) { console.log("Onboarding: " + e.message.slice(0, 90)); }
 
   if (!DRY) {
     try {
