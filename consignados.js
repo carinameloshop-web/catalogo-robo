@@ -422,7 +422,10 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
     const mes = new Map();
     for (const v of vendas) {
       if (!v.NOME_VENDEDOR || FORA.test(v.NOME_VENDEDOR) || v.CODIGO_VENDEDOR === ESTOQUE_CICLICO) continue;
-      if (v.SITUACAO && !/REALIZADO/i.test(v.SITUACAO)) continue;
+      // 26/09/2026: este filtro jogava fora TODA venda com SITUACAO "FATURADO"
+      // (5.851 linhas em 24 meses, ~40% do dinheiro). Agosto aparecia com
+      // R$ 43 mil em vez dos R$ 86 mil reais. Vale tudo que não foi cancelado.
+      if (/CANCEL/i.test(String(v.SITUACAO || ""))) continue;
       const k = v.CODIGO_VENDEDOR + "|" + String(v.DATA_VENDA).slice(0, 7);
       const o = mes.get(k) || { codigo_vendedor: v.CODIGO_VENDEDOR, mes: String(v.DATA_VENDA).slice(0, 7), pecas: 0, valor_itens: 0, docs: new Map() };
       o.pecas += v.QUANTIDADE || 0;
