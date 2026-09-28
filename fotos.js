@@ -25,6 +25,7 @@ const FOLDERS = [
   // Entram no catálogo como as outras e cada arquivo é registrado na tabela
   // fotos_cassia, porque a Carina paga R$ 1,00 por foto.
   "1yvAaTP0TB25pj4ZJ413tPUV0TBDSvZKM",
+    "17Im9E89tdQfhysVQNexBW8Fu3KuzZXKA",   // FOTOS BIA
 ];
 // QUEM FOTOGRAFOU (22/09/2026): a Carina paga R$ 1,00 por foto. Cada arquivo
 // destas pastas é registrado uma vez na tabela fotos_fotografo, e a Central
@@ -34,6 +35,7 @@ const FOTOGRAFO = {
   "11ibI_41F9-S6d4gjVIN_bXGsOtLou7AV": "Bia",
   "1mOffDv1VkstcmSm1VAMbntevLKQ6lFnL": "Bia",
   "1DIHkbdJG8ouPWrBHimCxPhNddDvXrjBm": "Bia",
+    "17Im9E89tdQfhysVQNexBW8Fu3KuzZXKA": "Bia",
   "1yvAaTP0TB25pj4ZJ413tPUV0TBDSvZKM": "Cássia",
 };
 // Esta pasta é especial: a foto dentro dela É a aprovação do modelo de
