@@ -294,7 +294,19 @@ async function inserirTodos(linhas) {
     prods = await terasoft(ini, fim);
     console.log(`Terasoft devolveu ${prods.length} produtos`);
   }
-  if (!prods.length) { console.log("Nada mudou na janela. Encerrando."); return; }
+    if (!prods.length) {
+    console.log("Nada mudou na janela. Encerrando.");
+    // Fim de semana ou feriado: a Terasoft devolve lista vazia. Sem gravar o carimbo aqui, a Central achava que o robô tinha parado.
+    try {
+      await fetch("https://dqljtdznecqzninwvtsj.supabase.co/rest/v1/robo_estado?on_conflict=robo", {
+        method: "POST",
+        headers: { apikey: SVC, Authorization: "Bearer " + SVC, "Content-Type": "application/json",
+                   Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify([{ robo: "estoque", quando: new Date().toISOString(), resumo: MODO + ": nada mudou" }]),
+      });
+    } catch (e) { /* nao e motivo pra derrubar a rodada */ }
+    return;
+  }
 
   const atual = await lerAtual();
   console.log(`Catálogo tem hoje ${atual.size} produtos`);
