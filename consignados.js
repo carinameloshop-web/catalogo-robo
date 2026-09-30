@@ -31,6 +31,13 @@ const SVC = process.env.SUPABASE_SERVICE_KEY;
 const TERA = process.env.TERASOFT_AUTH;
 const DRY = process.env.DRY === "1";
 const DIAS = parseInt(process.env.DIAS || "400", 10);
+// RODADA RAPIDA (30/09/2026, a Carina: "melhor isso ser automatico"). Quando a
+// colecao sai durante o dia, a afiliada abre o app e nao ve as semijoias novas
+// ate a madrugada seguinte. Agora o robo roda de meia em meia hora so na parte
+// das MALETAS, que e o que ela ve; a parte das vendas (que puxa 1100 dias e
+// alimenta o Fechamento) continua na rodada cheia, de 3 em 3 horas, pra nao
+// bater no limite de 12 consultas por hora da Terasoft.
+const SO_MALETAS = process.env.SO_MALETAS === "1";
 
 if (!SVC) { console.error("Faltou SUPABASE_SERVICE_KEY"); process.exit(1); }
 if (!TERA) { console.error("Faltou TERASOFT_AUTH"); process.exit(1); }
@@ -411,6 +418,19 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
     + pecasSairam + " peças saíram | " + fechadas + " fechadas (sem consignado aberto)");
 
   // ---- 5. vendas (acertos) por afiliada por mês, pro "game" da Minha Maleta
+  // Na rodada rápida isto fica de fora: é a consulta mais cara da Terasoft.
+  if (SO_MALETAS) {
+    if (!DRY) {
+      try {
+        await gravar("POST", "/robo_estado?on_conflict=robo", [{
+          robo: "consignados", quando: new Date().toISOString(),
+          resumo: abertos.length + " consignados abertos, " + porAfiliada.size + " maletas (rodada rápida)",
+        }], "resolution=merge-duplicates,return=minimal");
+      } catch (e) { /* não derruba a rodada */ }
+    }
+    console.log("Rodada rápida (só maletas). " + Math.round((Date.now() - t0) / 1000) + "s");
+    return;
+  }
   // Pedido da Carina em 15/09/2026: a afiliada vê quanto já ganhou desde que
   // entrou e sobe de nível pelas vendas PAGAS (7 semijoias no ciclo dobra a
   // chance de ela ficar). Na Terasoft, acerto = venda registrada (ep=venda).
