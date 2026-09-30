@@ -421,7 +421,13 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
     const vendas = await terasoft(ddmmaaaa(new Date(hoje.getTime() - 1100 * 86400000)), ddmmaaaa(hoje), "venda");
     const mes = new Map();
     for (const v of vendas) {
-      if (!v.NOME_VENDEDOR || FORA.test(v.NOME_VENDEDOR) || v.CODIGO_VENDEDOR === ESTOQUE_CICLICO) continue;
+      // CARINA DIRETO (000000) FICA (Carina, 30/09/2026): "esse precisa entrar
+      // como venda da Carina Melo sim, sao vendas feitas direto ao consumidor".
+      // Antes essa linha jogava fora o balcao inteiro (R$ 1.302 em setembro).
+      // Ele nao e afiliada: quem tira o 000000 das contagens de GENTE (quantas
+      // venderam, ranking, placar das 100, Estrelas) e a Central, no
+      // montarFechamento/montarEstrelas do api/central.js.
+      if (!v.NOME_VENDEDOR || FORA.test(v.NOME_VENDEDOR)) continue;
       // 26/09/2026: este filtro jogava fora TODA venda com SITUACAO "FATURADO"
       // (5.851 linhas em 24 meses, ~40% do dinheiro). Agosto aparecia com
       // R$ 43 mil em vez dos R$ 86 mil reais. Vale tudo que não foi cancelado.
