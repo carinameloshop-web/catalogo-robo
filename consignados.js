@@ -345,7 +345,7 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
     porAfiliada.get(a.id).cons.push(c);
   }
 
-  let abertas = 0, pecasNovas = 0, atualizadas = 0, pecasSairam = 0;
+  let abertas = 0, pecasNovas = 0, atualizadas = 0, pecasSairam = 0, qtdCorrigidas = 0;
   // Só tira peça ou fecha maleta se a Terasoft respondeu inteira (em 16/09 eram
   // ~115 abertos de afiliadas). Resposta capenga nunca esvazia maleta.
   const confiavel = porCodigo.size > 0 && abertos.filter((c) => c.codigo_vendedor !== ESTOQUE_CICLICO).length >= 60;
@@ -378,17 +378,59 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
     // Emanuelli e Marta tinham dezenas assim na vitrine, 16/09/2026).
     const cods = new Set(dela.filter((c) => !noEscritorio.has(c.numero)).flatMap((c) => [...c.itens.entries()]
       .filter(([, it]) => it.pendente === null || Number(it.pendente) > 0).map(([k]) => k)));
-    const jaTem = m.id ? new Set((await ler("/maleta_pecas?maleta_id=eq." + m.id + "&select=codigo")).map((p) => Number(p.codigo))) : new Set();
+    // DUAS SEMIJOIAS IGUAIS (30/09/2026, achado da Dayane: "vendi 2 desse mas no
+    // aplicativo só aparece 1"). A maleta guarda UMA linha por código, e a
+    // Terasoft manda igual de dois jeitos: a linha do consignado com QUANTIDADE
+    // 2 (comum em anel aparador, que sai em par) ou o mesmo código em dois
+    // consignados abertos dela. Nos dois casos a segunda semijoia sumia do app.
+    // Aqui somo tudo que está pendente e guardo quantas são.
+    const qtdPorCod = new Map();
+    for (const c of dela) {
+      if (noEscritorio.has(c.numero)) continue;
+      for (const [k, it] of c.itens.entries()) {
+        if (!(it.pendente === null || Number(it.pendente) > 0)) continue;
+        qtdPorCod.set(k, (qtdPorCod.get(k) || 0) + Math.max(1, Number(it.quantidade || 1)));
+      }
+    }
+    const quantas = (k) => Math.max(1, qtdPorCod.get(k) || 1);
+    let linhas = [];
+    try { linhas = m.id ? await ler("/maleta_pecas?maleta_id=eq." + m.id + "&select=codigo,quantidade") : []; }
+    catch (e) { linhas = m.id ? await ler("/maleta_pecas?maleta_id=eq." + m.id + "&select=codigo") : []; }
+    const jaTem = new Set(linhas.map((p) => Number(p.codigo)));
+    const qtdAtual = new Map(linhas.map((p) => [Number(p.codigo), Math.max(1, Number(p.quantidade || 1))]));
     const conferida = jaTem.size > 0;
     const entrar = [...cods].filter((k) => !jaTem.has(k));
     pecasNovas += entrar.length;
     // Peça que chega numa maleta já conferida entra como recebida (mesma regra
     // do sincronizar de 31/08). Maleta nova: ela confere quando abrir.
     if (entrar.length && m.id) {
-      await emLotes(entrar, 500, (l) => gravar("POST", "/maleta_pecas", l.map((k) => ({
-        maleta_id: m.id, codigo: k,
-        recebida: conferida ? true : null, conferida_em: conferida ? new Date().toISOString() : null,
-      }))));
+      const linha = (k, comQtd) => {
+        const o = { maleta_id: m.id, codigo: k,
+          recebida: conferida ? true : null, conferida_em: conferida ? new Date().toISOString() : null };
+        if (comQtd) o.quantidade = quantas(k);
+        return o;
+      };
+      // Enquanto o 47-semijoias-iguais.sql nao rodar, a coluna quantidade nao
+      // existe e o Supabase recusa a gravacao inteira. Entao tenta com, e se
+      // nao der, grava sem: nenhuma semijoia deixa de entrar na maleta por isso.
+      try {
+        await emLotes(entrar, 500, (l) => gravar("POST", "/maleta_pecas", l.map((k) => linha(k, true))));
+      } catch (e) {
+        await emLotes(entrar, 500, (l) => gravar("POST", "/maleta_pecas", l.map((k) => linha(k, false))));
+      }
+    }
+    // E corrige a quantidade de quem já estava na maleta: é o que devolve as
+    // semijoias que sumiram (26 espalhadas por 13 afiliadas em 30/09/2026).
+    if (m.id) {
+      for (const k of cods) {
+        if (!jaTem.has(k)) continue;
+        const nova = quantas(k);
+        if (qtdAtual.get(k) === nova) continue;
+        try {
+          await gravar("PATCH", "/maleta_pecas?maleta_id=eq." + m.id + "&codigo=eq." + k, { quantidade: nova });
+          qtdCorrigidas++;
+        } catch (e) { /* sem a coluna ainda (SQL 47): segue sem quebrar */ }
+      }
     }
     // Semijoia que saiu de todos os consignados abertos dela (devolvida ou
     // acertada na Terasoft) sai da maleta e da vitrine. A que ela registrou como
@@ -415,7 +457,8 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
     }
   }
   console.log("Maletas: " + abertas + " abertas agora | " + atualizadas + " atualizadas | " + pecasNovas + " peças entraram | "
-    + pecasSairam + " peças saíram | " + fechadas + " fechadas (sem consignado aberto)");
+    + pecasSairam + " peças saíram | " + fechadas + " fechadas (sem consignado aberto)"
+    + " | " + qtdCorrigidas + " com quantidade corrigida (semijoias iguais)");
 
   // ---- 5. vendas (acertos) por afiliada por mês, pro "game" da Minha Maleta
   // Na rodada rápida isto fica de fora: é a consulta mais cara da Terasoft.
