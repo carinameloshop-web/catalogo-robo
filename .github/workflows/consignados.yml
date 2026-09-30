@@ -1,19 +1,35 @@
 name: Consignados e maletas
 
-# Toda madrugada traz os consignados da Terasoft, mantém o espelho que o
-# painel da manhã lê e abre maleta pra quem tem peça na mão. Ver consignados.js.
+# Traz os consignados da Terasoft, mantém o espelho que a Central lê e abre
+# maleta pra quem tem semijoia na mão. Ver consignados.js.
 #
-# 04h30 de Brasília: depois da base inteira do estoque (03h) e antes de a
-# Carina e a Iza chegarem. O GitHub atrasa cron às vezes; uma vez por dia
-# aguenta qualquer atraso.
+# DE MEIA EM MEIA HORA, desde 30/09/2026 (a Carina: "melhor isso ser
+# automático"). Antes rodava uma vez por dia, de madrugada: quando a coleção
+# saía durante o dia, a afiliada abria o app e não via as semijoias novas até
+# o dia seguinte, e alguém tinha que apertar o botão "Trazer da Terasoft
+# agora" na Central.
+#
+# Duas rodadas diferentes, por causa do limite da Terasoft (12 consultas por
+# hora em cada endpoint):
+#   - RÁPIDA, de 30 em 30 min: só as maletas. Uma consulta.
+#   - CHEIA, de 3 em 3 horas: maletas + as vendas dos últimos 1100 dias, que
+#     alimentam o Fechamento e o "quanto você já ganhou" do app. Duas consultas.
+# Rodar na mão (workflow_dispatch) sempre faz a cheia.
 #
 # REPOSITÓRIO PÚBLICO: o log desta rodada é visível pra qualquer um. O robô só
 # imprime contagens, nunca nome, valor ou número de consignado.
 
 on:
   schedule:
-    - cron: '30 7 * * *'
+    - cron: '9,39 * * * *'
+    - cron: '13 */3 * * *'
   workflow_dispatch:
+
+# Duas rodadas ao mesmo tempo escreveriam nas mesmas maletas. A nova espera a
+# anterior terminar em vez de cancelar, pra nunca deixar maleta pela metade.
+concurrency:
+  group: consignados
+  cancel-in-progress: false
 
 jobs:
   consignados:
@@ -31,3 +47,4 @@ jobs:
         env:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           TERASOFT_AUTH: ${{ secrets.TERASOFT_AUTH }}
+          SO_MALETAS: ${{ github.event.schedule == '9,39 * * * *' && '1' || '0' }}
