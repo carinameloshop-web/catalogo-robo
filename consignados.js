@@ -404,9 +404,14 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
     // Peça que chega numa maleta já conferida entra como recebida (mesma regra
     // do sincronizar de 31/08). Maleta nova: ela confere quando abrir.
     if (entrar.length && m.id) {
+      // QUEM DIZ QUE RECEBEU E A AFILIADA (Carina, 30/09/2026). Ate 01/10 a
+      // semijoia que chegava numa maleta ja conferida entrava marcada como
+      // recebida, e a afiliada nunca era perguntada: a data de recebimento
+      // ficava vazia e o app so pedia conferencia das linhas velhas, de antes
+      // da coluna existir (a Fernanda viu 6 "novas" das quais 4 ela ja tinha
+      // vendido). Agora toda semijoia nova entra SEM conferencia e espera ela.
       const linha = (k, comQtd) => {
-        const o = { maleta_id: m.id, codigo: k,
-          recebida: conferida ? true : null, conferida_em: conferida ? new Date().toISOString() : null };
+        const o = { maleta_id: m.id, codigo: k, recebida: null, conferida_em: null };
         if (comQtd) o.quantidade = quantas(k);
         return o;
       };
