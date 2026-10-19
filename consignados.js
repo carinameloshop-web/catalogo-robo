@@ -327,7 +327,9 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
   const recebidoEm = new Map(recebimentos.map((r) => [r.numero, r.data_recebimento]));
 
   // Consignado que a Iza marcou como "no escritório": as semijoias não estão
-  // com a afiliada, então não entram na maleta nem na vitrine (17/09/2026).
+  // com a afiliada, então não entram na vitrine. DESDE 19/10/2026 ELAS CONTINUAM
+  // NA MALETA (maleta_pecas): é dela que o app monta o selo "No escritório" e o
+  // api/sincronizar.js devolve a peça de qualquer jeito. Só o filtro de pendente tira.
   let noEscritorio = new Set();
   try {
     noEscritorio = new Set((await ler("/consignados?situacao=eq.ABERTO&situacao_maleta=eq.no_escritorio&select=numero")).map((x) => x.numero));
@@ -376,7 +378,7 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
     // Só o que ainda está pendente. Peça já acertada ou devolvida dentro de um
     // consignado que segue aberto não está mais com ela (Jessica, Cibelli,
     // Emanuelli e Marta tinham dezenas assim na vitrine, 16/09/2026).
-    const cods = new Set(dela.filter((c) => !noEscritorio.has(c.numero)).flatMap((c) => [...c.itens.entries()]
+    const cods = new Set(dela.flatMap((c) => [...c.itens.entries()]
       .filter(([, it]) => it.pendente === null || Number(it.pendente) > 0).map(([k]) => k)));
     // DUAS SEMIJOIAS IGUAIS (30/09/2026, achado da Dayane: "vendi 2 desse mas no
     // aplicativo só aparece 1"). A maleta guarda UMA linha por código, e a
@@ -386,7 +388,6 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
     // Aqui somo tudo que está pendente e guardo quantas são.
     const qtdPorCod = new Map();
     for (const c of dela) {
-      if (noEscritorio.has(c.numero)) continue;
       for (const [k, it] of c.itens.entries()) {
         if (!(it.pendente === null || Number(it.pendente) > 0)) continue;
         qtdPorCod.set(k, (qtdPorCod.get(k) || 0) + Math.max(1, Number(it.quantidade || 1)));
