@@ -128,6 +128,28 @@ const SLUG_CARINA = "carina";
 // desde 15/09/2026 e entram normalmente nas maletas.
 const FORA = /AURORA|MIMECE|ALTEZZA/i;
 
+// Consignado apagado na Terasoft (05/11/2026). Em 400 dias de histórico só
+// apareceu UM. Se de uma vez sumirem mais que isso, o mais provável é a
+// resposta da Terasoft ter vindo cortada sem aviso (já aconteceu com o
+// produto_periodo), e aí é melhor não marcar ninguém e deixar pra uma pessoa ver.
+const MAX_SUMIDOS_POR_RODADA = 5;
+// A Terasoft só devolve os últimos DIAS dias. Aberto antigo no espelho que cai
+// fora dessa janela não "sumiu": só ficou longe demais pra ser visto. A margem
+// de 15 dias fica dentro da janela de propósito.
+const MARGEM_JANELA = 15;
+
+// Quais consignados o espelho tem como ABERTO e a Terasoft não devolveu mais
+// de jeito nenhum. Fora: os que a Terasoft devolveu (mesmo cancelados ou
+// concluídos, esses já se atualizam sozinhos), os de outra empresa (a limpeza
+// deles vem depois, no passo 3b) e os mais antigos que a janela consultada.
+function sumidosDoEspelho({ espelho, aindaAbertos, cons, outraEmpresa, hoje, dias }) {
+  const corte = new Date(hoje.getTime() - (dias - MARGEM_JANELA) * 86400000).toISOString().slice(0, 10);
+  return espelho
+    .filter((x) => x.data_saida && String(x.data_saida).slice(0, 10) >= corte)
+    .map((x) => x.numero)
+    .filter((n) => !aindaAbertos.has(n) && !cons.has(n) && !outraEmpresa.has(n));
+}
+
 (async () => {
   const t0 = Date.now();
   const hoje = new Date();
@@ -281,11 +303,34 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
   console.log("Transferências abertas (peça segurada pro mês seguinte): " + abertos.filter((c) => c.origem).length);
   await emLotes(linhas, 500, (l) => gravar("POST", "/consignados?on_conflict=numero", l, "resolution=merge-duplicates,return=minimal"));
 
-  // Aberto no espelho que a Terasoft já não devolve como aberto: atualiza a situação.
-  const noEspelho = await ler("/consignados?situacao=eq.ABERTO&select=numero");
+  // Só tira peça ou fecha maleta se a Terasoft respondeu inteira (em 16/09 eram
+  // ~115 abertos de afiliadas). Resposta capenga nunca esvazia maleta.
+  // (Subiu pra cá em 05/11/2026: o consignado sumido também só é marcado
+  // quando a resposta veio inteira.)
+  const confiavel = porCodigo.size > 0 && abertos.filter((c) => c.codigo_vendedor !== ESTOQUE_CICLICO).length >= 60;
+
+  // CONSIGNADO APAGADO NA TERASOFT (05/11/2026, caso Eduarda Dai). A Iza lançou a
+  // maleta duas vezes (005198 e 005199) e apagou a primeira. A Terasoft deixa de
+  // devolver um consignado apagado, então ele nunca chegava como EXCLUIDO/
+  // CONCLUIDO: o espelho o guardava como ABERTO pra sempre e a Central mostrava
+  // a maleta em dobro. Antes o robô só avisava "não mexi". Agora, se a resposta
+  // veio inteira, marca como EXCLUIDO e tira as peças dele (as da maleta saem
+  // sozinhas logo abaixo, porque ele deixa de estar entre os abertos).
+  const noEspelho = await ler("/consignados?situacao=eq.ABERTO&select=numero,data_saida");
   const aindaAbertos = new Set(abertos.map((c) => c.numero));
-  const fecharam = noEspelho.map((x) => x.numero).filter((n) => !aindaAbertos.has(n) && !cons.has(n));
-  if (fecharam.length) console.log("Aberto no espelho e sumido da Terasoft (não mexi): " + fecharam.length);
+  const sumidos = sumidosDoEspelho({ espelho: noEspelho, aindaAbertos, cons, outraEmpresa, hoje, dias: DIAS });
+  if (sumidos.length) {
+    if (!confiavel) {
+      console.log("Aberto no espelho e sumido da Terasoft (não mexi, resposta capenga): " + sumidos.length);
+    } else if (sumidos.length > MAX_SUMIDOS_POR_RODADA) {
+      console.log("Aberto no espelho e sumido da Terasoft (não mexi, são demais pra ser só apagado à mão): " + sumidos.length);
+    } else {
+      const aspas = (l) => l.map((n) => '"' + n + '"').join(",");
+      await gravar("PATCH", "/consignados?numero=in.(" + aspas(sumidos) + ")", { situacao: "EXCLUIDO", atualizado_em: new Date().toISOString() });
+      await gravar("DELETE", "/consignado_itens?numero=in.(" + aspas(sumidos) + ")");
+      console.log("Sumiu da Terasoft (apagado lá): " + sumidos.length + " marcados como EXCLUIDO");
+    }
+  }
 
   // Peças: só dos abertos. Reescreve as peças de cada aberto; as dos fechados saem.
   const itens = abertos.flatMap((c) => [...c.itens.values()].map((it) => ({ numero: c.numero, ...it,
@@ -348,9 +393,7 @@ const FORA = /AURORA|MIMECE|ALTEZZA/i;
   }
 
   let abertas = 0, pecasNovas = 0, atualizadas = 0, pecasSairam = 0, qtdCorrigidas = 0;
-  // Só tira peça ou fecha maleta se a Terasoft respondeu inteira (em 16/09 eram
-  // ~115 abertos de afiliadas). Resposta capenga nunca esvazia maleta.
-  const confiavel = porCodigo.size > 0 && abertos.filter((c) => c.codigo_vendedor !== ESTOQUE_CICLICO).length >= 60;
+  // (`confiavel` é calculada mais acima, antes do espelho.)
   for (const { a, cons: dela } of porAfiliada.values()) {
     dela.sort((x, y) => y.data_saida.localeCompare(x.data_saida));
     const ultimo = dela[0];
