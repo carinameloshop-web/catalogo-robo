@@ -118,11 +118,18 @@ const CIDADES = {
 const cidadeCerta = (c) => (c ? (CIDADES[c] || c) : null);
 
 const ESTOQUE_CICLICO = "000000";   // CARINA DIRETO
-// A MALETA DE EXEMPLO DA CARINA (22/09/2026): consignado feito no código do
-// estoque (000000), em nome dela, que ela quer ver na Minha Maleta (/carina).
-// Pra trocar de maleta, é só mudar o número aqui.
-const MALETA_DA_CARINA = new Set(["004777"]);
+// CONSIGNADO LANÇADO NO CÓDIGO DO ESTOQUE (000000) QUE É DE UMA AFILIADA.
+// número do consignado -> link (slug) de quem ele é. A Terasoft não deixa trocar
+// o vendedor depois que sai nota fiscal, então a correção mora aqui.
+//  004777: a maleta de exemplo da Carina (22/09/2026).
+//  005226: a primeira maleta da Lilian Alessandra (23/10/2026, 50 semijoias),
+//          lançada no CARINA DIRETO com ela só como cliente; com nota fiscal,
+//          a Iza não conseguiu passar pro código 000571 (20/11/2026).
+// ATENÇÃO: o ACERTO desses consignados tem que ser lançado com a vendedora
+// certa, senão a venda dela vira venda do escritório.
+const CONSIGNADO_DE = new Map([["004777", "carina"], ["005226", "lilian-alessandra"]]);
 const SLUG_CARINA = "carina";
+const donoForcado = (c, afs) => CONSIGNADO_DE.has(c.numero) ? (afs.find((x) => x.slug === CONSIGNADO_DE.get(c.numero)) || null) : null;
 // Vendedoras de Aurora Muniz, Mimece e Altezza (outras empresas na mesma
 // Terasoft) não são afiliadas. As PEÇAS da Mimece são coleção da Carina Melo
 // desde 15/09/2026 e entram normalmente nas maletas.
@@ -293,7 +300,7 @@ function sumidosDoEspelho({ espelho, aindaAbertos, cons, outraEmpresa, hoje, dia
 
   const linhas = guardar.map((c) => ({
     numero: c.numero, codigo_vendedor: c.codigo_vendedor,
-    afiliada_id: (MALETA_DA_CARINA.has(c.numero) ? (afs.find((x) => x.slug === SLUG_CARINA) || {}) : (porCodigo.get(c.codigo_vendedor) || {})).id || null,
+    afiliada_id: (donoForcado(c, afs) || porCodigo.get(c.codigo_vendedor) || {}).id || null,
     data_saida: c.data_saida, situacao: c.situacao,
     valor_total: c.valor_total, valor_pendente: c.pendenteNulo ? null : c.pendente,
     pecas: c.pecas, atualizado_em: new Date().toISOString(),
@@ -382,9 +389,10 @@ function sumidosDoEspelho({ espelho, aindaAbertos, cons, outraEmpresa, hoje, dia
 
   const porAfiliada = new Map();
   for (const c of abertos) {
-    // A maleta de exemplo da Carina entra mesmo sendo do código do estoque.
-    const daCarina = MALETA_DA_CARINA.has(c.numero);
-    const a = daCarina ? afs.find((x) => x.slug === SLUG_CARINA) : porCodigo.get(c.codigo_vendedor);
+    // Consignado do código do estoque que é de uma afiliada (CONSIGNADO_DE) entra na maleta dela.
+    const forcado = donoForcado(c, afs);
+    const daCarina = !!forcado;
+    const a = forcado || porCodigo.get(c.codigo_vendedor);
     // A Carina é "interna" no cadastro (fica fora das contas de afiliada), mas a
     // maleta dela entra: desde 22/09/2026 ela tem código de vendedora (000550).
     if (!a || (a.tipo === "interna" && !daCarina && a.slug !== SLUG_CARINA)) continue;
